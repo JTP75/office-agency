@@ -28,6 +28,8 @@ The frontend never talks to herdr directly, and the backend never draws pixels. 
 
 ## The contract
 
+`PROTOCOL.md` is the canonical, up-to-date version of this section (it adds `project`, `worktree`, `lobby` and `source`).
+
 The server pushes full snapshots over Server-Sent Events and accepts commands over POST. Every `/api/*` call carries the page's token as `?t=<token>`; the client reads it from its own URL.
 
 **Push (v0):** `GET /api/events?t=…` streams one JSON message per change. The server sends the current snapshot on connect, so the client never needs a separate fetch.
@@ -67,7 +69,7 @@ Backend builds the skeleton alone, then hands `client/` over. It's done when eve
 - [ ] `node server/index.mjs --source fixture` runs the same page with no herdr installed
 - [ ] Closing the server pane stops the server and removes `office.json`
 
-In progress on Justin's machine, not yet pushed: the plugin manifest, a zero-dependency Node server with token gate and SSE, `HerdrSource` (polls `herdr agent list` every 1 s) and `FixtureSource` (8 agents, random status every 3 s), the open action, and a plain-canvas client with a 26 × 14 tile map, movement and collision.
+Built and pushed: the plugin manifest, a zero-dependency Node server with token gate and SSE, `HerdrSource` (polls `herdr agent list` every 1 s, resolves each agent's project and worktree from git) and `FixtureSource` (13 agents across 2 projects and 5 worktrees, random status every 3 s), the open action, and a plain-canvas client with a tile map, movement and collision. Fixture and herdr modes verified from the command line; the herdr plugin path (link → action → pane) is not yet verified.
 
 The client is deliberately throwaway: no framework, no build step. Frontend picks the engine and tooling in phase 2; the only requirement is that the server can serve the built output from `client/` (or `client/dist/`).
 
