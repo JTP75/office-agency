@@ -32,11 +32,16 @@ function portFree(port, host) {
   });
 }
 
-export async function pickPort(host) {
-  for (let port = FIRST_PORT; port < FIRST_PORT + PORT_TRIES; port++) {
+// Without fallback the port is fixed, so dev setups that hard-code it (the Vite
+// proxy) fail loudly instead of silently talking to nothing.
+export async function pickPort(host, fallback) {
+  const last = fallback ? FIRST_PORT + PORT_TRIES - 1 : FIRST_PORT;
+  for (let port = FIRST_PORT; port <= last; port++) {
     if (await portFree(port, host)) return port;
   }
-  throw new Error(`no free port in ${FIRST_PORT}-${FIRST_PORT + PORT_TRIES - 1}`);
+  const range = fallback ? `any of ${FIRST_PORT}-${last}` : `port ${FIRST_PORT}`;
+  console.error(`office: ${range} is in use. Stop the other server, or set OFFICE_PORT.`);
+  process.exit(1);
 }
 
 export function writeOffice(office) {

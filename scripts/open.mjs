@@ -16,7 +16,7 @@ let office = readOffice();
 if (!office) {
   fs.mkdirSync(STATE_DIR, { recursive: true });
   const log = fs.openSync(LOG_FILE, "a");
-  spawn(process.execPath, [path.join(ROOT, "server", "index.mjs"), "--source", "herdr", "--no-open"], {
+  spawn(process.execPath, [path.join(ROOT, "server", "index.mjs"), "--source", "herdr", "--no-open", "--port-fallback"], {
     cwd: ROOT,
     detached: true,
     stdio: ["ignore", log, log],

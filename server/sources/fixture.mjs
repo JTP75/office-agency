@@ -1,11 +1,21 @@
-// Fake agents for working without herdr. Cycles statuses so the client
-// has something changing to render. Shape matches PROTOCOL.md exactly.
+// Fake agents for working without herdr. Shape matches PROTOCOL.md exactly,
+// including the command endpoints, so the client can be built end to end.
+//
+// Scenarios (--scenario <name> or OFFICE_SCENARIO):
+//   default  13 agents, 2 projects, 5 worktrees; random status every 3 s
+//   empty    no agents at all
+//   crowded  40 agents in one worktree room, plus a few in the lobby
+//   churn    default, plus agents and a whole project coming and going
+
+import { CommandError } from "./commands.mjs";
 
 const STATUSES = ["working", "idle", "blocked", "done", "unknown"];
 const TICK_MS = 3000;
+const CHURN_MS = 5000;
+const WORK_MS = 4000;
 
 // [project, worktree, lobby, kind, title]
-const SEATS = [
+const DEFAULT_SEATS = [
   ["office-agency", "main", true, "claude", "Plan the protocol"],
   ["office-agency", "main", true, "codex", "Review PRD wording"],
   ["office-agency", "main", true, "opencode", "Answer a question about herdr"],
@@ -22,36 +32,139 @@ const SEATS = [
   ["tts", "exp/streaming", false, "opencode", "Prototype streaming output"],
 ];
 
-export function createFixtureSource() {
+const KINDS = ["claude", "codex", "opencode"];
+
+function seatsFor(scenario) {
+  switch (scenario) {
+    case "empty":
+      return [];
+    case "crowded":
+      return [
+        ["office-agency", "main", true, "claude", "Coordinate the swarm"],
+        ["office-agency", "main", true, "codex", "Merge results"],
+        ...Array.from({ length: 40 }, (_, i) => ["office-agency", "swarm/research", false, KINDS[i % 3], `Research task ${i + 1}`]),
+      ];
+    case "default":
+    case "churn":
+      return DEFAULT_SEATS;
+    default:
+      throw new Error(`unknown fixture scenario "${scenario}" (default, empty, crowded, churn)`);
+  }
+}
+
+export function createFixtureSource({ scenario = "default" } = {}) {
   const listeners = new Set();
-  const agents = SEATS.map(([project, worktree, lobby, kind, title], i) => ({
-    id: `w1:p${i + 1}`,
+  let nextPane = 1;
+  const makeAgent = ([project, worktree, lobby, kind, title]) => ({
+    id: `w1:p${nextPane++}`,
     kind,
-    status: STATUSES[i % STATUSES.length],
+    status: STATUSES[nextPane % STATUSES.length],
     project,
     worktree,
     lobby,
     workspace: "w1",
-    tab: `w1:t${(i % 3) + 1}`,
+    tab: `w1:t${(nextPane % 3) + 1}`,
     title,
-  }));
+  });
+  let agents = seatsFor(scenario).map(makeAgent);
+  const history = new Map(); // id → fake terminal lines
+  const timers = [];
 
   function emit() {
     const snapshot = { type: "snapshot", source: "fixture", agents: agents.map((a) => ({ ...a })) };
     for (const cb of listeners) cb(snapshot);
   }
 
-  const timer = setInterval(() => {
-    const a = agents[Math.floor(Math.random() * agents.length)];
-    a.status = STATUSES[Math.floor(Math.random() * STATUSES.length)];
+  function find(id) {
+    const agent = agents.find((a) => a.id === id);
+    if (!agent) throw new CommandError(404, "agent_not_found", `agent ${id} not found`);
+    return agent;
+  }
+
+  function lines(agent) {
+    if (!history.has(agent.id)) {
+      history.set(agent.id, [
+        `$ ${agent.kind}`,
+        `(fixture) ${agent.kind} session in ${agent.project}${agent.lobby ? "" : ` @ ${agent.worktree}`}`,
+        `> ${agent.title}`,
+        "Reading files…",
+        "Thinking…",
+      ]);
+    }
+    return history.get(agent.id);
+  }
+
+  function startWork(agent, note) {
+    agent.status = "working";
+    lines(agent).push(note, "Working…");
     emit();
-  }, TICK_MS);
+    timers.push(
+      setTimeout(() => {
+        if (!agents.includes(agent) || agent.status !== "working") return;
+        agent.status = "done";
+        lines(agent).push("Done.");
+        emit();
+      }, WORK_MS),
+    );
+  }
+
+  if (scenario !== "empty") {
+    timers.push(
+      setInterval(() => {
+        if (!agents.length) return;
+        const a = agents[Math.floor(Math.random() * agents.length)];
+        a.status = STATUSES[Math.floor(Math.random() * STATUSES.length)];
+        if (a.status === "blocked") lines(a).push("Allow edit to src/auth.ts? [1] yes  [2] no  [esc] cancel");
+        emit();
+      }, TICK_MS),
+    );
+  }
+
+  if (scenario === "churn") {
+    let step = 0;
+    timers.push(
+      setInterval(() => {
+        step++;
+        if (step % 4 === 0) {
+          // Whole project leaves, then comes back.
+          const gone = agents.some((a) => a.project === "tts");
+          agents = gone ? agents.filter((a) => a.project !== "tts") : [...agents, ...DEFAULT_SEATS.filter((s) => s[0] === "tts").map(makeAgent)];
+        } else if (step % 2 === 0 && agents.length > 3) {
+          agents = agents.filter((_, i) => i !== Math.floor(Math.random() * agents.length));
+        } else {
+          agents = [...agents, makeAgent(DEFAULT_SEATS[Math.floor(Math.random() * DEFAULT_SEATS.length)])];
+        }
+        emit();
+      }, CHURN_MS),
+    );
+  }
 
   return {
     subscribe: (cb) => {
       listeners.add(cb);
       emit();
     },
-    close: () => clearInterval(timer),
+    has: (id) => agents.some((a) => a.id === id),
+    async prompt(id, text) {
+      const agent = find(id);
+      if (agent.status === "blocked") throw new CommandError(409, "agent_blocked", `agent ${id} is waiting on a dialog; answer it with keys`);
+      startWork(agent, `> ${text}`);
+    },
+    async read(id, n) {
+      return lines(find(id)).slice(-n);
+    },
+    async keys(id, keys) {
+      const agent = find(id);
+      lines(agent).push(`[keys] ${keys.join(" ")}`);
+      if (agent.status === "blocked" && keys.some((k) => ["enter", "1", "2", "y", "n"].includes(k))) startWork(agent, "Dialog answered.");
+      else if (agent.status === "blocked" && keys.includes("esc")) {
+        agent.status = "idle";
+        emit();
+      }
+    },
+    async focus(id) {
+      find(id); // nothing to focus in fixture mode
+    },
+    close: () => timers.forEach((t) => clearTimeout(t)),
   };
 }

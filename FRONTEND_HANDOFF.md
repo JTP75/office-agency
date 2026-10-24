@@ -86,22 +86,19 @@ Free art that's safe to use: [Kenney](https://kenney.nl/assets) (CC0, no attribu
 
 ### Using Vite with the server
 
-During development, run the server and Vite side by side, and let Vite forward `/api` to the server:
+During development, run the server and Vite side by side; Vite forwards `/api` to the server (already set up in `client/vite.config.ts`):
 
 ```bash
-# terminal 1: data server with a fixed dev token
+# terminal 1: data server with a fixed dev token (add --scenario empty|crowded|churn to test edge cases)
 OFFICE_TOKEN=dev node server/index.mjs --source fixture --no-open
 
 # terminal 2: your client
 cd client && npm run dev
 ```
 
-```js
-// client/vite.config.js
-export default { server: { proxy: { "/api": "http://127.0.0.1:4567" } } };
-```
+Open `http://localhost:5173/?t=dev`. The data server always uses port 4567 in dev. If that port is busy, it exits with a clear error instead of silently moving, so the Vite proxy never points at nothing.
 
-Open `http://localhost:5173/?t=dev`. When you run `npm run build`, the output goes to `client/dist/`, and the server automatically serves that instead of the raw files. So `node server/index.mjs` alone shows your built version.
+The server only serves the **built** client (`client/dist/`, from `npm run build`); without a build it shows a "not built yet" page. `herdr plugin install` builds it automatically, so keep `npm run build` passing on `main`.
 
 ---
 

@@ -5,6 +5,14 @@ min_herdr_version = "0.9.3"
 description = "Your agent fleet as a 2D office you can walk around"
 platforms = ["linux", "macos"]
 
+# Build the client on `herdr plugin install` (needs npm). `plugin link` skips
+# these; run them yourself in a linked checkout.
+[[build]]
+command = ["npm", "--prefix", "client", "ci", "--no-audit", "--no-fund"]
+
+[[build]]
+command = ["npm", "--prefix", "client", "run", "build"]
+
 # Opens the office in the browser, starting the background server if needed.
 # The server adds nothing to the layout and exits when herdr stops.
 [[actions]]
