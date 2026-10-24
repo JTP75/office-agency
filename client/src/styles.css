@@ -1,0 +1,169 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #0b0c10;
+  overflow: hidden;
+  font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
+  color: #e6e6e6;
+}
+
+#game canvas {
+  display: block;
+  image-rendering: pixelated;
+}
+
+.fatal {
+  padding: 24px;
+  color: #ff8a80;
+}
+
+.hud {
+  position: fixed;
+  z-index: 1;
+}
+
+.panel {
+  background: rgba(16, 17, 22, 0.82);
+  border: 2px solid #3a2a1c;
+  border-radius: 4px;
+  padding: 6px 10px;
+}
+
+/* Bottom-left so it never covers building signs at the top of the street. */
+.status {
+  bottom: 44px;
+  left: 8px;
+  min-width: 200px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.badge {
+  padding: 0 5px;
+  border-radius: 3px;
+  font-weight: 700;
+  font-size: 11px;
+}
+.badge.fixture {
+  background: #ff9800;
+  color: #1b1d23;
+}
+.badge.live {
+  background: #2e7d32;
+  color: #fff;
+}
+
+.conn {
+  margin-left: auto;
+  color: #9e9e9e;
+}
+.conn.live {
+  color: #81c784;
+}
+.conn.retrying,
+.conn.no-token {
+  color: #ff8a80;
+}
+
+.counts {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 0 10px;
+}
+.counts li.loud {
+  color: #ff8a80;
+  font-weight: 700;
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+.muted {
+  color: #9e9e9e;
+}
+
+.tabs {
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 60vw;
+}
+.tabs button {
+  font: inherit;
+  color: #e6e6e6;
+  background: rgba(16, 17, 22, 0.82);
+  border: 2px solid #3a2a1c;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.tabs button:hover {
+  border-color: #8a6440;
+}
+.tabs button:focus-visible {
+  outline: 2px solid #ffd54f;
+  outline-offset: 1px;
+}
+.tabs button.active {
+  background: #f4e7c5;
+  color: #2b2116;
+  border-color: #8a6440;
+}
+.tabs .n {
+  opacity: 0.7;
+}
+.blocked-badge {
+  background: #f44336;
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 5px;
+  font-weight: 700;
+  animation: pulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes pulse {
+  to {
+    transform: scale(1.15);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .blocked-badge {
+    animation: none;
+  }
+}
+
+.hint {
+  bottom: 8px;
+  left: 8px;
+  color: #bdbdbd;
+}
+
+.notice {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 420px;
+  text-align: center;
+}
+.notice code {
+  color: #ffd54f;
+}

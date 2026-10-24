@@ -1,0 +1,114 @@
+// Screen-fixed UI over the canvas. Agent text is rendered by React as text (escaped), never as HTML.
+import type { MouseEvent } from "react";
+import { STATUSES, type AgentStatus } from "../net/protocol";
+import { requestTravel, useOffice, type Location } from "../state/store";
+
+const STATUS_CSS: Record<AgentStatus, string> = {
+  working: "#4caf50",
+  idle: "#9e9e9e",
+  blocked: "#f44336",
+  done: "#2196f3",
+  unknown: "#7e57c2",
+};
+
+function same(a: Location, b: Location) {
+  return a.kind === b.kind && (a.kind === "street" || (b.kind === "building" && a.project === b.project));
+}
+
+function blur(e: MouseEvent<HTMLButtonElement>) {
+  // Hand the keyboard back to the game after clicking a tab.
+  e.currentTarget.blur();
+}
+
+export function Hud() {
+  const agents = useOffice((s) => s.agents);
+  const projects = useOffice((s) => s.projects);
+  const source = useOffice((s) => s.source);
+  const connection = useOffice((s) => s.connection);
+  const location = useOffice((s) => s.location);
+  const renderer = useOffice((s) => s.renderer);
+
+  const counts = Object.fromEntries(STATUSES.map((st) => [st, 0])) as Record<AgentStatus, number>;
+  for (const a of agents) counts[a.status]++;
+
+  const here = location.kind === "street" ? "On the street" : `Inside ${location.project}`;
+
+  return (
+    <>
+      <section className="hud panel status" aria-label="Agent status summary">
+        <div className="row">
+          {source === "fixture" && <span className="badge fixture">FIXTURE</span>}
+          {source && source !== "fixture" && <span className="badge live">{source}</span>}
+          <span>{agents.length} agents</span>
+          <span className={`conn ${connection}`}>{connection === "live" ? "● live" : connection}</span>
+        </div>
+        <ul className="counts">
+          {STATUSES.map((st) => (
+            <li key={st} className={st === "blocked" && counts[st] ? "loud" : ""}>
+              <span className="dot" style={{ background: STATUS_CSS[st] }} aria-hidden="true" />
+              {st} {counts[st]}
+            </li>
+          ))}
+        </ul>
+        <div className="muted">
+          {here} · {renderer}
+        </div>
+      </section>
+
+      <nav className="hud tabs" aria-label="Buildings">
+        <button
+          type="button"
+          aria-pressed={location.kind === "street"}
+          className={location.kind === "street" ? "active" : ""}
+          onClick={(e) => {
+            blur(e);
+            requestTravel({ kind: "street" });
+          }}
+        >
+          Street
+        </button>
+        {projects.map((p) => {
+          const inside = agents.filter((a) => a.project === p);
+          const blocked = inside.filter((a) => a.status === "blocked").length;
+          const to: Location = { kind: "building", project: p };
+          const active = same(location, to);
+          return (
+            <button
+              key={p}
+              type="button"
+              aria-pressed={active}
+              className={active ? "active" : ""}
+              onClick={(e) => {
+                blur(e);
+                requestTravel(to);
+              }}
+              aria-label={`${p}: ${inside.length} agents${blocked ? `, ${blocked} blocked` : ""}`}
+            >
+              {p} <span className="n">{inside.length}</span>
+              {blocked > 0 && <span className="blocked-badge">!{blocked}</span>}
+            </button>
+          );
+        })}
+      </nav>
+
+      <footer className="hud panel hint">WASD / arrows to walk · walk through a door to enter or leave · tabs jump to a building</footer>
+
+      {connection === "no-token" && (
+        <div className="hud panel notice" role="alert">
+          No token in the URL. Open the link the server prints (<code>?t=…</code>), or use <code>?t=dev</code> with{" "}
+          <code>OFFICE_TOKEN=dev</code>.
+        </div>
+      )}
+      {connection === "retrying" && (
+        <div className="hud panel notice" role="status">
+          Can't reach the office server; retrying…
+        </div>
+      )}
+      {connection === "live" && projects.length === 0 && (
+        <div className="hud panel notice" role="status">
+          No agents yet. Buildings appear as agents start.
+        </div>
+      )}
+    </>
+  );
+}
