@@ -1,4 +1,5 @@
 import { Container } from "pixi.js";
+import type { DistrictInput } from "../layout/street";
 import type { Agent } from "../../net/protocol";
 
 export const TILE = 16;
@@ -26,7 +27,7 @@ export abstract class Scene {
   abstract bounds(): { x: number; y: number; w: number; h: number };
   abstract isSolid(tx: number, ty: number): boolean;
   abstract triggerAt(tx: number, ty: number): Trigger | null;
-  abstract setAgents(agents: Agent[], projects: string[]): void;
+  abstract setAgents(agents: Agent[], districts: DistrictInput[]): void;
   abstract update(time: number): void;
 
   destroy() {

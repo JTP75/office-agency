@@ -4,7 +4,7 @@
 //
 //   node server/index.mjs                  # real agents from herdr
 //   node server/index.mjs --source fixture # fake agents, no herdr needed
-//     --scenario default|empty|crowded|churn  (fixture only)
+//     --scenario default|empty|crowded|churn|machines  (fixture only)
 //     --port-fallback                         try the next ports if busy (the daemon uses this)
 
 import http from "node:http";
@@ -12,11 +12,11 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { createHerdrSource } from "./sources/herdr.mjs";
+import { createOfficeSource } from "./sources/office.mjs";
 import { createFixtureSource } from "./sources/fixture.mjs";
 import { SOCKET_PATH } from "./herdr.mjs";
 import { openBrowser } from "./browser.mjs";
-import { readOffice, pickPort, writeOffice, onShutdown, shutdown } from "./lifecycle.mjs";
+import { STATE_DIR, readOffice, pickPort, writeOffice, onShutdown, shutdown } from "./lifecycle.mjs";
 import { AGENT_KINDS, CommandError, checkKeys, checkLines, checkPrompt, checkSpawn, checkTermScroll, checkWorktree } from "./sources/commands.mjs";
 import { createTermHub } from "./term/hub.mjs";
 import { nativeTerminal } from "./term/herdr-term.mjs";
@@ -46,7 +46,9 @@ if (running) {
 }
 
 const source =
-  sourceName === "herdr" ? createHerdrSource({ onDead: () => shutdown("herdr went away") }) : createFixtureSource({ scenario });
+  sourceName === "herdr"
+    ? createOfficeSource({ onDead: () => shutdown("herdr went away"), stateDir: STATE_DIR })
+    : createFixtureSource({ scenario });
 onShutdown(() => source.close());
 const terms = createTermHub(source);
 onShutdown(() => terms.closeAll());
@@ -62,7 +64,7 @@ const MIME = {
 };
 
 const clients = new Set();
-let latest = { type: "snapshot", agents: [] };
+let latest = { type: "snapshot", source: sourceName, agents: [], machines: [] };
 
 source.subscribe((snapshot) => {
   latest = snapshot;

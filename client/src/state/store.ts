@@ -1,7 +1,10 @@
 // One store shared by the Pixi world and the React HUD so they never disagree.
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
-import type { Agent } from "../net/protocol";
+import type { Agent, Machine } from "../net/protocol";
+import { districtsOf } from "./districts";
+
+export { districtsOf, type District } from "./districts";
 
 export type Connection = "connecting" | "live" | "retrying" | "no-token";
 
@@ -20,6 +23,10 @@ export interface OfficeState {
   agents: Agent[];
   /** Projects in first-seen order. Append-only so buildings never swap lots. */
   projects: string[];
+  /** Saved SSH machines, in the server's order. */
+  machines: Machine[];
+  /** Which machine each project is on (label, null = local). Sticky like `projects`. */
+  projectMachine: Record<string, string | null>;
   location: Location;
   renderer: string;
   /** Requested by the HUD; the game consumes it and performs the transition. */
@@ -44,6 +51,8 @@ export const store = createStore<OfficeState>(() => ({
   source: null,
   agents: [],
   projects: [],
+  machines: [],
+  projectMachine: {},
   location: { kind: "street" },
   renderer: "…",
   travelRequest: null,
@@ -56,17 +65,19 @@ export const store = createStore<OfficeState>(() => ({
   openWhenSeen: null,
 }));
 
-export function applySnapshot(source: string, agents: Agent[]) {
-  const known = store.getState().projects;
+export function applySnapshot(source: string, agents: Agent[], machines: Machine[] = []) {
+  const { projects: known, projectMachine: knownMachine } = store.getState();
   const seen = new Set(known);
   const projects = [...known];
+  const projectMachine = { ...knownMachine };
   for (const a of agents) {
     if (!seen.has(a.project)) {
       seen.add(a.project);
       projects.push(a.project);
     }
+    projectMachine[a.project] = a.machine;
   }
-  store.setState({ source, agents, projects, connection: "live" });
+  store.setState({ source, agents, projects, machines, projectMachine, connection: "live" });
   const pending = store.getState().openWhenSeen;
   if (pending && agents.some((a) => a.id === pending)) {
     store.setState({ openWhenSeen: null });
@@ -131,3 +142,6 @@ export function roomsIn(agents: Agent[], project: string): Room[] {
   }
   return [...rooms.values()].sort((a, b) => Number(b.lobby) - Number(a.lobby) || (a.worktree ?? "").localeCompare(b.worktree ?? ""));
 }
+
+/** Districts for the current state. */
+export const districts = (s: OfficeState) => districtsOf(s.projects, s.projectMachine, s.machines);

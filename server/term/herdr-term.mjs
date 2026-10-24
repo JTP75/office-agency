@@ -3,7 +3,9 @@
 // A session is one `herdr terminal session control <pane> --takeover` process:
 // it prints NDJSON `terminal.frame` / `terminal.closed` records and reads
 // `terminal.input` / `terminal.resize` / `terminal.scroll` / `terminal.mouse` /
-// `terminal.release` commands on stdin.
+// `terminal.release` commands on stdin. It runs against whichever server
+// `socketPath` points at: the local one, or a saved machine's forwarded socket
+// (herdr finds the stream socket next to it, `<name>-client.sock`).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -22,9 +24,10 @@ export function scrollCommand({ direction, lines, column, row }) {
   return cmd;
 }
 
-export function openHerdrTerminal(paneId, { cols, rows }, { onFrame, onClosed }) {
+export function openHerdrTerminal(paneId, { cols, rows }, { onFrame, onClosed }, { socketPath = SOCKET_PATH } = {}) {
   const proc = spawn(HERDR, ["terminal", "session", "control", paneId, "--takeover", "--cols", String(cols), "--rows", String(rows)], {
     stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, HERDR_SOCKET_PATH: socketPath },
   });
   let done = false;
   let lastError = "";
@@ -103,7 +106,7 @@ const LAUNCHERS = {
   },
 };
 
-function shellQuote(s) {
+export function shellQuote(s) {
   return /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, "'\\''")}'`;
 }
 
@@ -118,11 +121,22 @@ export function nativeTerminal() {
   return launcher?.[process.platform] ? { key, label: launcher.label } : null;
 }
 
-export function openNative(terminalId) {
+/** The argv a native window runs to attach to a terminal on a saved machine, over its own SSH session. */
+export function remoteAttachCommand({ target, herdr, socket }, terminalId) {
+  const remote = ["env", `HERDR_SOCKET_PATH=${socket}`, herdr, "terminal", "attach", terminalId, "--takeover"].map(shellQuote).join(" ");
+  return ["ssh", "-t", target, remote];
+}
+
+// `machine` is { target, herdr, socket } for a saved SSH machine. The window
+// gets its own SSH session rather than our forwarded socket, so it keeps
+// working after the office stops, and can ask for a password if SSH needs one.
+export function openNative(terminalId, machine = null) {
   const term = nativeTerminal();
   if (!term) throw new CommandError(501, "not_supported", "no supported native terminal configured (config.json \"terminal\": ghostty | kitty | terminal)");
   // The app is launched outside our environment, so pin the herdr session explicitly.
-  const cmd = ["/usr/bin/env", `HERDR_SOCKET_PATH=${SOCKET_PATH}`, HERDR, "terminal", "attach", terminalId, "--takeover"];
+  const cmd = machine
+    ? remoteAttachCommand(machine, terminalId)
+    : ["/usr/bin/env", `HERDR_SOCKET_PATH=${SOCKET_PATH}`, HERDR, "terminal", "attach", terminalId, "--takeover"];
   const [bin, args] = LAUNCHERS[term.key][process.platform](cmd);
   const child = spawn(bin, args, { stdio: "ignore", detached: true });
   child.on("error", (err) => console.error(`open-native: ${err.message}`));

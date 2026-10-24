@@ -52,6 +52,12 @@ The drawer's **Ghostty ↗** button opens the agent in a native terminal instead
 
 Supported: `ghostty` (default), `kitty`, `terminal` (macOS Terminal.app).
 
+## Other machines
+
+Agents on herdr's saved SSH machines (`herdr machine add`) show up too, each machine as its own district along the street, with a sign that says whether it's connected. They work like local ones: the terminal drawer, prompts, keys, new agents and worktrees all run on that machine.
+
+The office holds one SSH connection per enabled machine and forwards that machine's herdr sockets over it. It uses your normal SSH config without prompting, so a machine that needs a password, a passphrase or a host key shows **attention** with the command to fix it (usually `herdr machine reconnect <label>`), then reconnects by itself. It never installs or starts herdr on a machine.
+
 ## Uninstall
 
 ```bash
@@ -69,7 +75,7 @@ herdr plugin action invoke office-agency.open
 herdr plugin action invoke office-agency.stop && herdr plugin action invoke office-agency.open
 ```
 
-Without herdr, `node server/index.mjs --source fixture` serves the same page with fake agents (`--scenario empty|crowded|churn` for edge cases).
+Without herdr, `node server/index.mjs --source fixture` serves the same page with fake agents (`--scenario empty|crowded|churn|machines` for edge cases).
 
 ## Tests
 

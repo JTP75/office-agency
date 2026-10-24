@@ -6,6 +6,8 @@
 //   empty    no agents at all
 //   crowded  40 agents in one worktree room, plus a few in the lobby
 //   churn    default, plus agents and a whole project coming and going
+//   machines default, plus two saved SSH machines: one online with its own
+//            projects (one shares a name with a local project), one offline
 
 import { CommandError, pickName } from "./commands.mjs";
 import { FakeTerm } from "../term/fake.mjs";
@@ -15,7 +17,7 @@ const TICK_MS = 3000;
 const CHURN_MS = 5000;
 const WORK_MS = 4000;
 
-// [project, worktree, lobby, kind, title]
+// [project, worktree, lobby, kind, title, machine id?]
 const DEFAULT_SEATS = [
   ["office-agency", "main", true, "claude", "Plan the protocol"],
   ["office-agency", "main", true, "codex", "Review PRD wording"],
@@ -35,6 +37,23 @@ const DEFAULT_SEATS = [
 
 const KINDS = ["claude", "codex", "opencode"];
 
+// Saved SSH machines for the "machines" scenario. ids look like herdr profile ids.
+const PC = "fa7e0000000000000000000000000001";
+const ORIN = "fa7e0000000000000000000000000002";
+const MACHINES = [
+  { id: PC, label: "pacel-pc", status: "online", message: null },
+  { id: ORIN, label: "pacel-orin", status: "offline", message: "ssh: connect to host pacel-orin port 22: Operation timed out" },
+];
+const MACHINE_SEATS = [
+  ["vettd", "main", true, "claude", "Triage CI failures", PC],
+  ["vettd", "main", true, "hermes", "Watch the deploy", PC],
+  ["vettd", "fix/pr-1174", false, "claude", "Address review comments", PC],
+  ["vettd", "fix/pr-1174", false, "opencode", "Rerun flaky suite", PC],
+  ["vettd", "auto-ws/issue-218", false, "codex", "Reproduce issue 218", PC],
+  // Same repo name as a local project: it becomes "office-agency @ pacel-pc".
+  ["office-agency", "main", true, "claude", "Benchmark on the GPU box", PC],
+];
+
 function seatsFor(scenario) {
   switch (scenario) {
     case "empty":
@@ -48,32 +67,47 @@ function seatsFor(scenario) {
     case "default":
     case "churn":
       return DEFAULT_SEATS;
+    case "machines":
+      return [...DEFAULT_SEATS, ...MACHINE_SEATS];
     default:
-      throw new Error(`unknown fixture scenario "${scenario}" (default, empty, crowded, churn)`);
+      throw new Error(`unknown fixture scenario "${scenario}" (default, empty, crowded, churn, machines)`);
   }
 }
 
 export function createFixtureSource({ scenario = "default" } = {}) {
   const listeners = new Set();
-  let nextPane = 1;
-  const makeAgent = ([project, worktree, lobby, kind, title]) => ({
-    id: `w1:p${nextPane++}`,
-    kind,
-    status: STATUSES[nextPane % STATUSES.length],
-    project,
-    worktree,
-    lobby,
-    workspace: "w1",
-    tab: `w1:t${(nextPane % 3) + 1}`,
-    title,
-  });
+  const machines = scenario === "machines" ? MACHINES : [];
+  // Pane ids are per server, so each machine counts from w1:p1 too (and collides with local).
+  const nextPane = new Map();
+  const makeAgent = ([project, worktree, lobby, kind, title, machine = null]) => {
+    const n = (nextPane.get(machine) ?? 0) + 1;
+    nextPane.set(machine, n);
+    return {
+      id: machine ? `${machine}/w1:p${n}` : `w1:p${n}`,
+      kind,
+      status: STATUSES[n % STATUSES.length],
+      project: machine && DEFAULT_SEATS.some((s) => s[0] === project) ? `${project} @ ${machines.find((m) => m.id === machine).label}` : project,
+      worktree,
+      lobby,
+      machine: machine ? machines.find((m) => m.id === machine).label : null,
+      machineId: machine,
+      workspace: "w1",
+      tab: `w1:t${(n % 3) + 1}`,
+      title,
+    };
+  };
   let agents = seatsFor(scenario).map(makeAgent);
   const history = new Map(); // id → fake terminal lines
   const terms = new Map(); // id → open FakeTerm
   const timers = [];
 
   function emit() {
-    const snapshot = { type: "snapshot", source: "fixture", agents: agents.map((a) => ({ ...a })) };
+    const snapshot = {
+      type: "snapshot",
+      source: "fixture",
+      agents: agents.map(({ machineId, ...a }) => a),
+      machines: machines.map((m) => ({ ...m })),
+    };
     for (const cb of listeners) cb(snapshot);
     for (const [id, term] of terms) {
       const agent = agents.find((a) => a.id === id) ?? null;
@@ -102,9 +136,9 @@ export function createFixtureSource({ scenario = "default" } = {}) {
   }
 
   // A new agent shows up idle at its prompt, like a freshly started harness.
-  function arrive([project, worktree, lobby, kind], name) {
-    const title = pickName(kind, name, new Set(agents.map((a) => a.title)));
-    const agent = { ...makeAgent([project, worktree, lobby, kind, title]), status: "idle" };
+  function arrive({ project, worktree, lobby, machineId }, kind, name) {
+    const title = pickName(kind, name, new Set(agents.filter((a) => a.machineId === machineId).map((a) => a.title)));
+    const agent = { ...makeAgent([project, worktree, lobby, kind, title, machineId]), project, status: "idle" };
     agents = [...agents, agent];
     emit();
     return { agent: agent.id, name: title };
@@ -179,18 +213,20 @@ export function createFixtureSource({ scenario = "default" } = {}) {
       }
     },
     async focus(id) {
-      find(id); // nothing to focus in fixture mode
+      const agent = find(id); // nothing to focus in fixture mode
+      return agent.machine ? { machine: agent.machine } : {};
     },
     async spawn({ project, lobby, worktree, kind, name }) {
       const room = agents.find((a) => a.project === project && (lobby ? a.lobby : !a.lobby && a.worktree === worktree));
       if (!room) throw new CommandError(404, "room_not_found", `no agents in ${project} ${lobby ? "lobby" : worktree} to start next to`);
-      return arrive([project, room.worktree, room.lobby, kind], name);
+      return arrive(room, kind, name);
     },
     async createWorktree({ project, branch, kind, name }) {
-      if (!agents.some((a) => a.project === project)) throw new CommandError(404, "room_not_found", `no project ${project}`);
+      const repo = agents.find((a) => a.project === project);
+      if (!repo) throw new CommandError(404, "room_not_found", `no project ${project}`);
       if (agents.some((a) => a.project === project && a.worktree === branch))
         throw new CommandError(409, "worktree_exists", `${branch} is already checked out in ${project}`);
-      return arrive([project, branch, false, kind], name);
+      return arrive({ project, worktree: branch, lobby: false, machineId: repo.machineId }, kind, name);
     },
     openTerminal(id, { cols, rows }, { onFrame, onClosed }) {
       const agent = find(id);

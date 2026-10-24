@@ -137,6 +137,60 @@ body {
   gap: 2px;
   align-items: stretch;
 }
+/* One machine's buildings, behind a chip with its name and connection. */
+.district {
+  display: flex;
+  gap: 4px;
+  align-items: stretch;
+  flex-wrap: wrap;
+  padding-left: 6px;
+  border-left: 2px solid rgba(255, 255, 255, 0.18);
+}
+.district:first-of-type {
+  border-left: none;
+  padding-left: 0;
+}
+.district-label {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+  color: #fff;
+  background: var(--machine-bg, #37474f);
+}
+.district-label.online,
+.machine.online {
+  --machine-bg: #2e7d32;
+}
+.district-label.connecting,
+.machine.connecting {
+  --machine-bg: #9a7b0a;
+}
+.district-label.offline,
+.machine.offline {
+  --machine-bg: #5f6368;
+}
+.district-label.attention,
+.machine.attention {
+  --machine-bg: #c62828;
+}
+.machines {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+}
+.machine .dot {
+  background: var(--machine-bg);
+}
+.machine-message {
+  margin: 2px 0 2px 14px;
+  color: #ffcdd2;
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
 .tabs .blocked-badge,
 .blocked-badge {
   border: 2px solid #b71c1c;

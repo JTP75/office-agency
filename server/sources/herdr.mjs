@@ -1,4 +1,6 @@
-// Real agent state from herdr, push-fed.
+// Real agent state from one herdr server, push-fed. The local server, or a
+// saved SSH machine's server through its forwarded socket (machines.mjs);
+// office.mjs merges them into the snapshot.
 //
 // Events are treated as invalidation signals: any relevant event triggers a
 // fresh agent.list read (the approach herdr's socket docs recommend). Two
@@ -9,11 +11,10 @@
 //     stale id rejects the whole request, so it's rebuilt whenever the set of
 //     agent panes changes.
 
-import path from "node:path";
-import { request, subscribe } from "../herdr.mjs";
-import { placeOf } from "./git.mjs";
+import { SOCKET_PATH, request as rawRequest, subscribe as rawSubscribe } from "../herdr.mjs";
+import { placeOf as gitPlaceOf } from "./git.mjs";
 import { CommandError, pickName } from "./commands.mjs";
-import { openHerdrTerminal, openNative } from "../term/herdr-term.mjs";
+import { openHerdrTerminal } from "../term/herdr-term.mjs";
 
 const LIFECYCLE = ["pane.created", "pane.closed", "pane.updated", "pane.moved", "pane.agent_detected"];
 const SAFETY_POLL_MS = 5000;
@@ -25,7 +26,16 @@ const START_GRACE_MS = 1500; // before trusting "shell in the foreground" as a f
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function createHerdrSource({ onDead }) {
+// Agents come out as { pane, kind, status, project, worktree, lobby, root,
+// checkout, workspace, tab, title, terminal }: `root` and `checkout` are paths on
+// that server's machine, used to create agents and worktrees and to tell apart
+// projects that share a name. `placeOf` resolves a cwd to that place; locally
+// it runs git, for a machine it asks the machine's herdr (place.mjs).
+// `name` prefixes log lines ("pacel-pc: …") so a machine's errors aren't mistaken for local ones.
+export function createHerdrSource({ socketPath = SOCKET_PATH, placeOf = gitPlaceOf, onDead, name = null }) {
+  const log = (msg) => console.error(name ? `${name}: ${msg}` : msg);
+  const request = (method, params) => rawRequest(socketPath, method, params);
+  const subscribe = (subs, onEvent, onEnd) => rawSubscribe(socketPath, subs, onEvent, onEnd);
   const listeners = new Set();
   let last = "";
   let watchedIds = "";
@@ -33,9 +43,8 @@ export function createHerdrSource({ onDead }) {
   let statusSub = null;
   let closed = false;
   let known = new Set();
-  let terminalIds = new Map(); // pane id → herdr terminal id (for the native link-out)
-  let places = []; // { project, lobby, worktree, root, checkout, workspace } per agent, for creating agents and worktrees
-  let names = new Set(); // live herdr agent names (unique per herdr)
+  let agents = [];
+  let names = new Set(); // live herdr agent names (unique per herdr server)
 
   let refreshing = false;
   let again = false;
@@ -59,7 +68,7 @@ export function createHerdrSource({ onDead }) {
         await load();
       } while (again && !closed);
     } catch (err) {
-      console.error("agent.list failed:", err.message);
+      log(`agent.list failed: ${err.message}`);
     }
     refreshing = false;
   }
@@ -69,27 +78,24 @@ export function createHerdrSource({ onDead }) {
     const ids = raw.map((a) => a.pane_id).sort();
     if (ids.join(",") !== watchedIds) watchStatuses(ids);
 
-    const placed = await Promise.all(
+    agents = await Promise.all(
       raw.map(async (a) => ({
-        id: a.pane_id,
+        pane: a.pane_id,
         kind: a.agent,
         status: a.agent_status,
         ...(await placeOf(a.foreground_cwd ?? a.cwd)),
         workspace: a.workspace_id,
         tab: a.tab_id,
         title: a.terminal_title_stripped ?? "",
+        terminal: a.terminal_id,
       })),
     );
-    const agents = uniqueProjects(placed);
-    known = new Set(agents.map((a) => a.id));
-    terminalIds = new Map(raw.map((a) => [a.pane_id, a.terminal_id]));
-    places = agents.map((a, i) => ({ ...a, root: placed[i].root, checkout: placed[i].checkout }));
+    known = new Set(agents.map((a) => a.pane));
     names = new Set(raw.map((a) => a.name).filter(Boolean));
-    const snapshot = { type: "snapshot", source: "herdr", agents };
-    const json = JSON.stringify(snapshot);
+    const json = JSON.stringify(agents);
     if (json === last) return;
     last = json;
-    for (const cb of listeners) cb(snapshot);
+    for (const cb of listeners) cb(agents);
   }
 
   function watchStatuses(ids) {
@@ -103,7 +109,7 @@ export function createHerdrSource({ onDead }) {
       schedule,
       (err) => {
         if (closed || sub !== statusSub) return; // replaced on purpose
-        if (err) console.error(`status subscription ended: ${err.code ?? err.message}`);
+        if (err) log(`status subscription ended: ${err.code ?? err.message}`);
         statusSub = null;
         watchedIds = ""; // forces a resubscribe on the next read
         setTimeout(schedule, 500);
@@ -118,9 +124,10 @@ export function createHerdrSource({ onDead }) {
       schedule,
       async (err) => {
         if (closed) return;
-        console.error(`lifecycle subscription ended: ${err?.code ?? err?.message ?? "closed"}`);
+        log(`lifecycle subscription ended: ${err?.code ?? err?.message ?? "closed"}`);
         for (let i = 0; i < RECONNECT_TRIES; i++) {
           await sleep(1000);
+          if (closed) return; // closed while we waited (a machine being reconnected)
           try {
             await request("ping");
             watchLifecycle();
@@ -137,11 +144,11 @@ export function createHerdrSource({ onDead }) {
   schedule();
   const timer = setInterval(schedule, SAFETY_POLL_MS);
 
-  // Commands. Only agents in the current snapshot can be targeted, so the
-  // browser can never reach a plain shell pane.
-  function target(id) {
-    if (!known.has(id)) throw new CommandError(404, "agent_not_found", `agent ${id} not found`);
-    return id;
+  // Commands take herdr pane ids. Only agents in the current list can be
+  // targeted, so the browser can never reach a plain shell pane.
+  function target(pane) {
+    if (!known.has(pane)) throw new CommandError(404, "agent_not_found", `agent ${pane} not found`);
+    return pane;
   }
 
   async function call(method, params) {
@@ -190,33 +197,41 @@ export function createHerdrSource({ onDead }) {
   }
 
   return {
-    subscribe: (cb) => listeners.add(cb),
-    has: (id) => known.has(id),
-    async prompt(id, text) {
-      await call("agent.prompt", { target: target(id), text });
+    socketPath,
+    /** cb(agents) on every change; the current list right away if there is one. */
+    subscribe(cb) {
+      listeners.add(cb);
+      if (last) cb(agents);
+    },
+    has: (pane) => known.has(pane),
+    async prompt(pane, text) {
+      await call("agent.prompt", { target: target(pane), text });
       schedule();
     },
-    async read(id, lines) {
-      const { read } = await call("agent.read", { target: target(id), source: "recent_unwrapped", format: "text", lines });
+    async read(pane, lines) {
+      const { read } = await call("agent.read", { target: target(pane), source: "recent_unwrapped", format: "text", lines });
       return read.text.replace(/\n+$/, "").split("\n");
     },
-    async keys(id, keys) {
-      await call("agent.send_keys", { target: target(id), keys });
+    async keys(pane, keys) {
+      await call("agent.send_keys", { target: target(pane), keys });
       schedule();
     },
-    async focus(id) {
-      await call("agent.focus", { target: target(id) });
+    async focus(pane) {
+      await call("agent.focus", { target: target(pane) });
     },
-    openTerminal(id, size, events) {
-      return openHerdrTerminal(target(id), size, events);
+    openTerminal(pane, size, events) {
+      return openHerdrTerminal(target(pane), size, events, { socketPath });
+    },
+    terminalOf(pane) {
+      const agent = agents.find((a) => a.pane === target(pane));
+      if (!agent?.terminal) throw new CommandError(404, "agent_not_found", `no terminal for ${pane}`);
+      return agent.terminal;
     },
     // New agents get their own tab in the room's workspace, so they never
     // squeeze an existing pane. A tab whose agent didn't start is closed again.
-    async spawn({ project, lobby, worktree, kind, name }) {
-      const room = places.find((p) => p.project === project && (lobby ? p.lobby : !p.lobby && p.worktree === worktree));
-      if (!room) throw new CommandError(404, "room_not_found", `no agents in ${project} ${lobby ? "lobby" : worktree} to start next to`);
+    async spawnIn({ workspace, checkout }, kind, name) {
       const agentName = pickName(kind, name, names);
-      const { tab, root_pane } = await call("tab.create", { workspace_id: room.workspace, cwd: room.checkout, label: agentName, focus: false });
+      const { tab, root_pane } = await call("tab.create", { workspace_id: workspace, cwd: checkout, label: agentName, focus: false });
       try {
         return await start(root_pane.pane_id, kind, agentName);
       } catch (err) {
@@ -226,21 +241,14 @@ export function createHerdrSource({ onDead }) {
     },
     // herdr opens the new worktree as its own workspace; its first pane gets the agent.
     // If the agent fails to start, the worktree stays: it's the user's branch now.
-    async createWorktree({ project, branch, base, kind, name }) {
-      const repo = places.find((p) => p.project === project && p.worktree !== null);
-      if (!repo) throw new CommandError(404, "room_not_found", `${project} is not a git repo with a running agent`);
+    async createWorktreeIn(root, { branch, base, kind, name }) {
       const agentName = pickName(kind, name, names);
-      const { workspace, root_pane } = await call("worktree.create", { cwd: repo.root, branch, base, label: branch, focus: false });
+      const { workspace, root_pane } = await call("worktree.create", { cwd: root, branch, base, label: branch, focus: false });
       try {
         return await start(root_pane?.pane_id ?? (await firstPane(workspace.workspace_id)), kind, agentName);
       } catch (err) {
         throw new CommandError(err.status ?? 502, err.code ?? "herdr_error", `worktree created, but the agent didn't start: ${err.message}`);
       }
-    },
-    async openNative(id) {
-      const terminalId = terminalIds.get(target(id));
-      if (!terminalId) throw new CommandError(404, "agent_not_found", `no terminal for ${id}`);
-      return openNative(terminalId);
     },
     close: () => {
       closed = true;
@@ -250,17 +258,4 @@ export function createHerdrSource({ onDead }) {
       statusSub?.close();
     },
   };
-}
-
-// Two different directories with the same name would otherwise merge into one
-// building. Disambiguate with the parent directory's name: "api (work)".
-function uniqueProjects(agents) {
-  const roots = new Map();
-  for (const a of agents) {
-    if (!roots.has(a.project)) roots.set(a.project, new Set());
-    roots.get(a.project).add(a.root);
-  }
-  return agents.map(({ root, checkout, ...a }) =>
-    roots.get(a.project).size > 1 ? { ...a, project: `${a.project} (${path.basename(path.dirname(root))})` } : a,
-  );
 }

@@ -214,7 +214,10 @@ export class InteriorScene extends Scene {
       this.signs.addChild(sign);
     }
     const lobbyN = agents.filter((a) => a.lobby).length;
-    const lobbySign = makePlaque(`${truncate(this.project, 20)} · lobby · ${lobbyN}`, {
+    // A saved machine's building says where it is (unless the name already does: "api @ box").
+    const machine = agents.find((a) => a.machine)?.machine;
+    const name = machine && !this.project.endsWith(` @ ${machine}`) ? `${truncate(this.project, 20)} @ ${truncate(machine, 16)}` : truncate(this.project, 28);
+    const lobbySign = makePlaque(`${name} · lobby · ${lobbyN}`, {
       size: 5,
       fg: 0xffffff,
       bg: 0x3a2a1c,
