@@ -7,6 +7,8 @@ import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef, useState } from "react";
 import { agentPath, apiUrl, post } from "../net/api";
 import { store } from "../state/store";
+import { typedInput } from "./termInput";
+import { cellAt, notchesFor, scrollCommand } from "./wheel";
 
 type Frame = { type: "frame"; full: boolean; width: number; height: number; bytes: string };
 type Closed = { type: "closed"; reason: string };
@@ -17,6 +19,10 @@ const THEME = {
   cursor: "#ffd54f",
   selectionBackground: "#3a3f4b",
 };
+
+// The server will not open a session below this (POST term/resize has the same limit).
+const MIN_COLS = 20;
+const MIN_ROWS = 5;
 
 function b64ToBytes(b64: string) {
   const bin = atob(b64);
@@ -52,13 +58,25 @@ export function TerminalView({ agentId }: { agentId: string }) {
   const host = useRef<HTMLDivElement>(null);
   const [ended, setEnded] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // One silent re-attach when another window takes control mid-session (e.g. the
+  // pane is resized/reattached by herdr). Never loops: one retry per open.
+  const retried = useRef(false);
+
+  useEffect(() => {
+    retried.current = false;
+  }, [agentId]);
 
   useEffect(() => {
     const el = host.current!;
     setEnded(null);
     const term = new Terminal({
-      fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+      fontFamily: 'ui-monospace, Menlo, "SF Mono", Consolas, monospace',
       fontSize: 13,
+      // Explicit line height: block and half-block art (OpenCode's logo, its box
+      // separators and the ▀ rule under the prompt) lines up cell-for-cell
+      // instead of leaving a gap between rows.
+      lineHeight: 1,
+      letterSpacing: 0,
       theme: THEME,
       cursorBlink: true,
       scrollback: 0, // the agent's TUI owns its own history; we mirror its screen
@@ -98,11 +116,29 @@ export function TerminalView({ agentId }: { agentId: string }) {
       if (text && live) post(agentPath(agentId, "term/input"), { text }).catch(() => {});
     };
     const typed = term.onData((d) => {
-      pending += d;
+      // onData also carries xterm's replies to terminal queries; those are not
+      // keystrokes and must never be typed into the agent.
+      const text = typedInput(d);
+      if (!text) return;
+      pending += text;
       if (!flushQueued) {
         flushQueued = true;
         requestAnimationFrame(flush);
       }
+    });
+
+    // The wheel scrolls the agent's TUI, not the prompt history. xterm would
+    // otherwise turn it into arrow keys in the alternate screen (PROTOCOL.md
+    // "Terminal": term/scroll). Always handled here, so no arrows are emitted.
+    let carry = 0;
+    term.attachCustomWheelEventHandler((ev) => {
+      const step = notchesFor(ev.deltaY, ev.deltaMode, carry);
+      carry = step.carry;
+      if (step.notches && live) {
+        const { column, row } = cellAt(ev.clientX, ev.clientY, el.getBoundingClientRect(), term.cols, term.rows);
+        post(agentPath(agentId, "term/scroll"), scrollCommand(step.notches, column, row)).catch(() => {});
+      }
+      return false;
     });
 
     // Refit when the drawer or window changes size, and tell the agent's pane.
@@ -118,16 +154,28 @@ export function TerminalView({ agentId }: { agentId: string }) {
     });
     observer.observe(el);
 
+    // Open at a size the server accepts even if the drawer has not been laid out
+    // yet; a later ResizeObserver pass resizes it.
+    const cols = term.cols >= MIN_COLS ? term.cols : 80;
+    const rows = term.rows >= MIN_ROWS ? term.rows : 24;
+
     (async () => {
       try {
-        const res = await fetch(apiUrl(agentPath(agentId, "term"), { cols: term.cols, rows: term.rows }), { signal: abort.signal });
+        const res = await fetch(apiUrl(agentPath(agentId, "term"), { cols, rows }), { signal: abort.signal });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           return end(body.message ?? `couldn't open terminal (${res.status})`);
         }
         term.focus(); // control immediately
         await readEvents(res, (ev) => {
-          if (ev.type === "closed") return end(ev.reason);
+          if (ev.type === "closed") {
+            if (/taken over/.test(ev.reason) && !retried.current) {
+              retried.current = true;
+              setAttempt((n) => n + 1); // silent: re-take control without the overlay
+              return;
+            }
+            return end(ev.reason);
+          }
           // Another viewer may have resized the shared session.
           if (ev.width !== term.cols || ev.height !== term.rows) term.resize(ev.width, ev.height);
           term.write(b64ToBytes(ev.bytes));
@@ -151,6 +199,11 @@ export function TerminalView({ agentId }: { agentId: string }) {
     };
   }, [agentId, attempt]);
 
+  const reconnect = () => {
+    retried.current = false;
+    setAttempt((n) => n + 1);
+  };
+
   return (
     <div className="term">
       <div className="term-host" ref={host} />
@@ -158,7 +211,7 @@ export function TerminalView({ agentId }: { agentId: string }) {
         <div className="term-overlay" role="status">
           <p>{describe(ended)}</p>
           {ended !== "agent gone" && (
-            <button type="button" onClick={() => setAttempt((n) => n + 1)}>
+            <button type="button" onClick={reconnect}>
               Reconnect
             </button>
           )}

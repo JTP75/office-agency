@@ -1,0 +1,10 @@
+{
+  "name": "office-agency",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test server/test client/test",
+    "build": "npm --prefix client run build",
+    "typecheck": "npm --prefix client run typecheck"
+  }
+}

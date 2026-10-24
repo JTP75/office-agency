@@ -17,7 +17,7 @@ import { createFixtureSource } from "./sources/fixture.mjs";
 import { SOCKET_PATH } from "./herdr.mjs";
 import { openBrowser } from "./browser.mjs";
 import { readOffice, pickPort, writeOffice, onShutdown, shutdown } from "./lifecycle.mjs";
-import { CommandError, checkKeys, checkLines, checkPrompt } from "./sources/commands.mjs";
+import { CommandError, checkKeys, checkLines, checkPrompt, checkTermScroll } from "./sources/commands.mjs";
 import { createTermHub } from "./term/hub.mjs";
 import { nativeTerminal } from "./term/herdr-term.mjs";
 
@@ -151,6 +151,10 @@ const COMMANDS = {
     const { cols, rows } = termSize((k) => body?.[k]);
     terms.resize(knownAgent(id), cols, rows);
   },
+  // The wheel. herdr delivers it to the app as a mouse-wheel event when the app
+  // asked for mouse reporting (and drops it otherwise), so it scrolls the TUI
+  // instead of becoming an arrow key.
+  "POST term/scroll": async (id, req) => terms.scroll(knownAgent(id), checkTermScroll(await readBody(req))),
 };
 
 // SSE stream of one agent's terminal. Errors are reported as JSON before the

@@ -70,3 +70,12 @@ herdr plugin action invoke office-agency.stop && herdr plugin action invoke offi
 ```
 
 Without herdr, `node server/index.mjs --source fixture` serves the same page with fake agents (`--scenario empty|crowded|churn` for edge cases).
+
+## Tests
+
+```bash
+npm test                     # server (node:test) + the client's pure helpers
+npm --prefix client run build # typecheck + bundle
+```
+
+The terminal drawer's wheel handling, xterm reply filtering and hub session sharing are covered by tests under `server/test` and `client/test`.
