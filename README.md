@@ -28,6 +28,18 @@ description = "open office"
 
 Press it: a small server starts in the background and your browser opens the office. Nothing is added to your herdr layout.
 
+## Try it without herdr
+
+No herdr installed? Run the demo with fake agents:
+
+```bash
+git clone https://github.com/JTP75/office-agency.git
+cd office-agency
+npm run demo
+```
+
+The script installs client dependencies and builds only when needed, then starts fixture mode and opens the browser. The office opens at `http://127.0.0.1:4567` (or the next free port, up to 4576) with scripted agents.
+
 ## How it runs
 
 | | |

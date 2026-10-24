@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "name": "Run Server Tests",
+  "description": "Automatically run the server test suite when any JavaScript module under server/ is modified",
+  "version": "1.0.0",
+  "tags": ["test", "server", "validation"],
+  "when": {
+    "type": "fileEdited",
+    "patterns": ["server/**/*.mjs", "server/**/*.js"]
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "node --test server/test/"
+  }
+}
