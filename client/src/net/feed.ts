@@ -10,7 +10,12 @@ export function connectFeed() {
   }
   fetch(`/api/ping?t=${encodeURIComponent(token)}`)
     .then((r) => (r.ok ? r.json() : null))
-    .then((p) => store.setState({ nativeTerminal: typeof p?.nativeTerminal === "string" ? p.nativeTerminal : null }))
+    .then((p) =>
+      store.setState({
+        nativeTerminal: typeof p?.nativeTerminal === "string" ? p.nativeTerminal : null,
+        kinds: Array.isArray(p?.kinds) ? p.kinds.filter((k: unknown): k is string => typeof k === "string") : [],
+      }),
+    )
     .catch(() => {});
   const events = new EventSource(`/api/events?t=${encodeURIComponent(token)}`);
   events.onopen = () => store.setState({ connection: "live" });

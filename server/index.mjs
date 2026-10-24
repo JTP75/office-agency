@@ -17,7 +17,7 @@ import { createFixtureSource } from "./sources/fixture.mjs";
 import { SOCKET_PATH } from "./herdr.mjs";
 import { openBrowser } from "./browser.mjs";
 import { readOffice, pickPort, writeOffice, onShutdown, shutdown } from "./lifecycle.mjs";
-import { CommandError, checkKeys, checkLines, checkPrompt, checkTermScroll } from "./sources/commands.mjs";
+import { AGENT_KINDS, CommandError, checkKeys, checkLines, checkPrompt, checkSpawn, checkTermScroll, checkWorktree } from "./sources/commands.mjs";
 import { createTermHub } from "./term/hub.mjs";
 import { nativeTerminal } from "./term/herdr-term.mjs";
 
@@ -169,6 +169,23 @@ function openTerm(req, res, url, rawId) {
   }
 }
 
+// Creating things: POST /api/agents (an agent in an existing room) and
+// POST /api/worktrees (a new room with its first agent). See PROTOCOL.md "Create".
+const CREATE = {
+  "/api/agents": async (req) => source.spawn(checkSpawn(await readBody(req))),
+  "/api/worktrees": async (req) => source.createWorktree(checkWorktree(await readBody(req))),
+};
+
+async function create(req, res, handler) {
+  if (req.method !== "POST") return json(res, 405, { error: "bad_request", message: "use POST" });
+  try {
+    json(res, 200, { ok: true, ...(await handler(req)) });
+  } catch (err) {
+    if (!(err instanceof CommandError)) console.error(err);
+    json(res, err.status ?? 500, { error: err.code ?? "internal", message: err.message });
+  }
+}
+
 async function command(req, res, url) {
   const m = url.pathname.match(/^\/api\/agents\/([^/]+)\/([a-z-]+(?:\/[a-z-]+)?)$/);
   if (m && req.method === "GET" && m[2] === "term") return openTerm(req, res, url, m[1]);
@@ -203,7 +220,13 @@ const server = http.createServer((req, res) => {
     // Lets the client tell "server down" (network error) from "server restarted
     // with a new token" (401), which EventSource can't distinguish.
     if (url.pathname === "/api/ping")
-      return json(res, 200, { ok: true, source: sourceName, nativeTerminal: sourceName === "herdr" ? (nativeTerminal()?.label ?? null) : null });
+      return json(res, 200, {
+        ok: true,
+        source: sourceName,
+        nativeTerminal: sourceName === "herdr" ? (nativeTerminal()?.label ?? null) : null,
+        kinds: AGENT_KINDS,
+      });
+    if (CREATE[url.pathname]) return create(req, res, CREATE[url.pathname]);
     if (url.pathname.startsWith("/api/agents/")) return command(req, res, url);
     return notFound(res);
   }

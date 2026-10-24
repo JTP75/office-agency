@@ -3,12 +3,14 @@ import "./styles.css";
 import { Game } from "./game/Game";
 import { connectFeed } from "./net/feed";
 import { AgentDrawer } from "./ui/AgentDrawer";
+import { CreateForm } from "./ui/CreateForm";
 import { Hud } from "./ui/Hud";
 
 createRoot(document.getElementById("ui")!).render(
   <>
     <Hud />
     <AgentDrawer />
+    <CreateForm />
   </>,
 );
 
