@@ -1,7 +1,7 @@
 // Screen-fixed UI over the canvas. Agent text is rendered by React as text (escaped), never as HTML.
 import type { MouseEvent } from "react";
 import { STATUSES, type AgentStatus } from "../net/protocol";
-import { requestTravel, useOffice, type Location } from "../state/store";
+import { nextBlocked, openAgent, requestTravel, useOffice, type Location } from "../state/store";
 
 const STATUS_CSS: Record<AgentStatus, string> = {
   working: "#4caf50",
@@ -73,25 +73,42 @@ export function Hud() {
           const to: Location = { kind: "building", project: p };
           const active = same(location, to);
           return (
-            <button
-              key={p}
-              type="button"
-              aria-pressed={active}
-              className={active ? "active" : ""}
-              onClick={(e) => {
-                blur(e);
-                requestTravel(to);
-              }}
-              aria-label={`${p}: ${inside.length} agents${blocked ? `, ${blocked} blocked` : ""}`}
-            >
-              {p} <span className="n">{inside.length}</span>
-              {blocked > 0 && <span className="blocked-badge">!{blocked}</span>}
-            </button>
+            <span key={p} className="tab-group">
+              <button
+                type="button"
+                aria-pressed={active}
+                className={active ? "active" : ""}
+                onClick={(e) => {
+                  blur(e);
+                  requestTravel(to);
+                }}
+                aria-label={`${p}: ${inside.length} agents${blocked ? `, ${blocked} blocked` : ""}`}
+              >
+                {p} <span className="n">{inside.length}</span>
+              </button>
+              {blocked > 0 && (
+                <button
+                  type="button"
+                  className="blocked-badge"
+                  title={`Open the next blocked agent in ${p}`}
+                  aria-label={`Open the next blocked agent in ${p}`}
+                  onClick={(e) => {
+                    blur(e);
+                    const next = nextBlocked(p);
+                    if (next) openAgent(next.id, "hud");
+                  }}
+                >
+                  !{blocked}
+                </button>
+              )}
+            </span>
           );
         })}
       </nav>
 
-      <footer className="hud panel hint">WASD / arrows to walk · walk through a door to enter or leave · tabs jump to a building</footer>
+      <footer className="hud panel hint">
+        WASD / arrows walk · doors enter and leave · <kbd>E</kbd> or click an agent to talk · <kbd>B</kbd> next blocked
+      </footer>
 
       {connection === "no-token" && (
         <div className="hud panel notice" role="alert">

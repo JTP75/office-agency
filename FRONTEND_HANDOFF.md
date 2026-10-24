@@ -102,6 +102,23 @@ The server only serves the **built** client (`client/dist/`, from `npm run build
 
 ---
 
+### Agent drawer (built by Justin; please keep these hooks working)
+
+Walk up to an agent and press **E**, click an agent, or click a building's red **!N** badge (or press **B**) to open a right-side drawer with that agent's live terminal.
+
+| Hook | Where | What it's for |
+| --- | --- | --- |
+| `openAgent(id, by)`, `closeDrawer()`, `nextBlocked()` | `src/state/store.ts` | Open, close, cycle. `by` = `"e"` / `"click"` / `"hud"`; only an `"e"` drawer closes when you walk away |
+| `drawer`, `nearAgent`, `typing` | store state | Which drawer is open, who's in E range, whether keys go to the terminal |
+| `agentNear()`, `distanceTo()`, clickable `AgentView.body` | `src/game/scenes/InteriorScene.ts` | Proximity and click-to-open. If you change how agents are drawn, keep the body clickable |
+| `trackAgents()`, camera offset | `src/game/Game.ts` | Updates `nearAgent`, closes E drawers on walk-away, keeps the player centred left of the drawer |
+| E / B / Esc keys | `src/game/input.ts` | Ignored while typing in the terminal (the existing `typing()` guard) |
+| `--drawer-w` CSS variable | `src/ui/drawerLayout.ts` | Centre HUD pieces with `calc((100vw - var(--drawer-w, 0px)) / 2)` so they don't hide under the drawer |
+
+The drawer UI itself is `src/ui/AgentDrawer.tsx` and `src/term/TerminalView.tsx`. Restyle freely.
+
+---
+
 ## 5. Vibe coding: how to work with an AI coding agent
 
 You'll write most of this by describing what you want to an AI coding agent (Claude Code, Cursor, Codex, etc.). These habits matter more than which tool you use.

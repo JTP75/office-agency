@@ -8,6 +8,7 @@
 //   churn    default, plus agents and a whole project coming and going
 
 import { CommandError } from "./commands.mjs";
+import { FakeTerm } from "../term/fake.mjs";
 
 const STATUSES = ["working", "idle", "blocked", "done", "unknown"];
 const TICK_MS = 3000;
@@ -68,11 +69,17 @@ export function createFixtureSource({ scenario = "default" } = {}) {
   });
   let agents = seatsFor(scenario).map(makeAgent);
   const history = new Map(); // id → fake terminal lines
+  const terms = new Map(); // id → open FakeTerm
   const timers = [];
 
   function emit() {
     const snapshot = { type: "snapshot", source: "fixture", agents: agents.map((a) => ({ ...a })) };
     for (const cb of listeners) cb(snapshot);
+    for (const [id, term] of terms) {
+      const agent = agents.find((a) => a.id === id) ?? null;
+      term.refresh(agent && { ...agent });
+      if (!agent) terms.delete(id);
+    }
   }
 
   function find(id) {
@@ -164,6 +171,30 @@ export function createFixtureSource({ scenario = "default" } = {}) {
     },
     async focus(id) {
       find(id); // nothing to focus in fixture mode
+    },
+    openTerminal(id, { cols, rows }, { onFrame, onClosed }) {
+      const agent = find(id);
+      const api = this;
+      const term = new FakeTerm({
+        cols,
+        rows,
+        agent: { ...agent },
+        history: () => lines(agent),
+        prompt: (text) => api.prompt(id, text),
+        keys: (keys) => api.keys(id, keys),
+        onFrame,
+        onClosed,
+      });
+      terms.get(id)?.release(); // one session per agent; the hub enforces this too
+      terms.set(id, term);
+      return {
+        input: (data) => term.input(data),
+        resize: (c, r) => term.resize(c, r),
+        release: () => {
+          term.release();
+          if (terms.get(id) === term) terms.delete(id);
+        },
+      };
     },
     close: () => timers.forEach((t) => clearTimeout(t)),
   };

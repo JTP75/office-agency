@@ -74,9 +74,41 @@ Allowed keys: `esc` `enter` `tab` `shift+tab` `up` `down` `left` `right` `space`
 
 A prompt's effect shows up as a status change in the next snapshot (usually `working`), not in the response.
 
+## Terminal
+
+A live view of an agent's real terminal, so every harness's TUI works in the office. One session per agent is shared by every viewer. It opens on the first viewer and is released when the last one disconnects. Opening takes control automatically: anyone else controlling that pane (another tab, a native terminal window) loses it.
+
+| Call | Body | Does |
+| --- | --- | --- |
+| `GET /api/agents/:id/term?cols=C&rows=R` | — | SSE stream of the terminal (below). `cols` 20–300, `rows` 5–120: size it to fit your view; the agent's pane is resized to match while the session is open. Errors (404, 400, 501) come back as JSON before the stream starts |
+| `POST /api/agents/:id/term/input` | `{ "text": "…" }` or `{ "bytes": "<base64>" }` | Keystrokes, exactly as typed (xterm.js `onData` output goes straight in). Not filtered |
+| `POST /api/agents/:id/term/resize` | `{ "cols": C, "rows": R }` | The view changed size. The newest viewer's size wins |
+
+`term/input` and `term/resize` need an open stream for that agent, otherwise `409 no_session`.
+
+Stream events:
+
+```json
+{ "type": "frame", "full": true, "width": 80, "height": 24, "bytes": "<base64 ANSI>" }
+{ "type": "closed", "reason": "agent gone" }
+```
+
+- **`frame`**: write the decoded bytes to the terminal emulator. A `full` frame redraws the whole screen and is always sent first, including to a viewer joining an open session. If `width`/`height` differ from your terminal's (another viewer resized it), resize to match.
+- **`closed`**: the session is over (`agent gone`, `detached`, `terminal attach taken over`, …). The stream then ends; offer Reconnect unless the agent is gone.
+
+**Fixture mode** runs a small fake agent TUI per agent: a transcript, a `❯` prompt line, and a numbered dialog while blocked. Typing echoes; Enter sends through the same path as `prompt` (status goes working → done); `1`/`y`/Enter or `2`/`n` answers a dialog; Esc cancels it.
+
+**herdr mode** streams the agent's real terminal (`herdr terminal session control --takeover`), so every harness's TUI works, menus and dialogs included. While the stream is open, the agent's pane takes your `cols`×`rows`; when the last viewer leaves, control is released and an attached herdr window gets its own size back.
+
+### Native terminal: `POST /api/agents/:id/open-native`
+
+Opens the agent in a native terminal window (`herdr terminal attach <terminal_id> --takeover`). That window takes control, so an open stream gets `closed` with `terminal attach taken over`; opening the stream again takes it back. Returns `{ ok, terminal: "Ghostty" }`; `501 not_supported` in fixture mode or with no supported app.
+
+The app comes from `config.json` in the plugin's config directory (`herdr plugin config-dir office-agency`): `{ "terminal": "ghostty" | "kitty" | "terminal" }`, default `ghostty` (`terminal` = macOS Terminal.app).
+
 ## Ping: `GET /api/ping?t=<token>`
 
-`200 { "ok": true, "source": "herdr" }` with a valid token, `401` with a stale one. Use it when the event stream errors: a network error means the server is down (keep retrying); a `401` means the server restarted with a new token, so this tab is dead. Tell the user to reopen the office from herdr.
+`200 { "ok": true, "source": "herdr", "nativeTerminal": "Ghostty" }` with a valid token (`nativeTerminal` is null when the link-out isn't available), `401` with a stale one. Use it when the event stream errors: a network error means the server is down (keep retrying); a `401` means the server restarted with a new token, so this tab is dead. Tell the user to reopen the office from herdr.
 
 ## Fixture scenarios
 

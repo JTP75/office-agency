@@ -1,7 +1,8 @@
 // Owns the Pixi application, the active scene, the player, the camera and scene transitions.
 import { Application, Container, Graphics } from "pixi.js";
 import type { Agent } from "../net/protocol";
-import { store, type Location } from "../state/store";
+import { closeDrawer, store, type Location } from "../state/store";
+import { drawerWidth } from "../ui/drawerLayout";
 import { loadAssets } from "./assets";
 import { installInput } from "./input";
 import { SeatBook } from "./layout/seats";
@@ -11,6 +12,10 @@ import type { Scene } from "./scenes/Scene";
 import { StreetScene } from "./scenes/StreetScene";
 
 const FADE_S = 0.18;
+/** E works within this many tiles of an agent's seat (desks sit between you and them). */
+const NEAR_TILES = 2.3;
+/** An E-opened drawer closes once you walk this far from the agent. */
+const LEAVE_TILES = 3.5;
 
 type Fade = { phase: "out" | "in"; t: number; to: Location };
 
@@ -139,8 +144,22 @@ export class Game {
       else if (trig?.kind === "exit") this.travel({ kind: "street" });
     }
 
+    this.trackAgents();
     this.stepFade(dt);
     this.camera();
+  }
+
+  /** Who's in reach for E, and close an E-opened drawer when we walk away. */
+  private trackAgents() {
+    const s = store.getState();
+    const inside = this.scene instanceof InteriorScene ? this.scene : null;
+    const { tileX, tileY } = this.player;
+    const near = inside && !this.fade ? inside.agentNear(tileX, tileY, NEAR_TILES) : null;
+    if (near !== s.nearAgent) store.setState({ nearAgent: near });
+    if (s.drawer?.openedBy === "e" && !this.fade) {
+      const d = inside?.distanceTo(s.drawer.agentId, tileX, tileY) ?? null;
+      if (d === null || d > LEAVE_TILES) closeDrawer();
+    }
   }
 
   private stepFade(dt: number) {
@@ -174,7 +193,9 @@ export class Game {
   }
 
   private camera() {
-    const { width, height } = this.app.screen;
+    // Center on the part of the screen the agent drawer doesn't cover.
+    const width = this.app.screen.width - drawerWidth(store.getState().drawer !== null);
+    const { height } = this.app.screen;
     const z = this.zoom;
     const b = this.scene.bounds();
     const axis = (view: number, start: number, size: number, focus: number) => {
