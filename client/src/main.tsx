@@ -2,9 +2,15 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import { Game } from "./game/Game";
 import { connectFeed } from "./net/feed";
+import { AgentDrawer } from "./ui/AgentDrawer";
 import { Hud } from "./ui/Hud";
 
-createRoot(document.getElementById("ui")!).render(<Hud />);
+createRoot(document.getElementById("ui")!).render(
+  <>
+    <Hud />
+    <AgentDrawer />
+  </>,
+);
 
 const game = new Game();
 game

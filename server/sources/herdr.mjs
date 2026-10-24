@@ -162,6 +162,9 @@ export function createHerdrSource({ onDead }) {
     async focus(id) {
       await call("agent.focus", { target: target(id) });
     },
+    openTerminal() {
+      throw new CommandError(501, "not_implemented", "live herdr terminals arrive in the next change; use --source fixture");
+    },
     close: () => {
       closed = true;
       clearInterval(timer);

@@ -18,6 +18,7 @@ import { SOCKET_PATH } from "./herdr.mjs";
 import { openBrowser } from "./browser.mjs";
 import { readOffice, pickPort, writeOffice, onShutdown, shutdown } from "./lifecycle.mjs";
 import { CommandError, checkKeys, checkLines, checkPrompt } from "./sources/commands.mjs";
+import { createTermHub } from "./term/hub.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // The client is served from its Vite build. Checked per request, so building
@@ -46,6 +47,8 @@ if (running) {
 const source =
   sourceName === "herdr" ? createHerdrSource({ onDead: () => shutdown("herdr went away") }) : createFixtureSource({ scenario });
 onShutdown(() => source.close());
+const terms = createTermHub(source);
+onShutdown(() => terms.closeAll());
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -111,16 +114,55 @@ function readBody(req) {
   });
 }
 
-// /api/agents/:id/<verb>. Only these four verbs reach herdr.
+function termSize(get) {
+  const cols = Number(get("cols"));
+  const rows = Number(get("rows"));
+  if (!Number.isInteger(cols) || cols < 20 || cols > 300 || !Number.isInteger(rows) || rows < 5 || rows > 120)
+    throw new CommandError(400, "bad_request", "cols must be 20-300 and rows 5-120");
+  return { cols, rows };
+}
+
+function checkTermInput(body) {
+  if (typeof body?.text === "string" && body.text) return { text: body.text };
+  if (typeof body?.bytes === "string" && body.bytes) return { bytes: body.bytes };
+  throw new CommandError(400, "bad_request", "send { text } or { bytes } (base64)");
+}
+
+function knownAgent(id) {
+  if (!source.has(id)) throw new CommandError(404, "agent_not_found", `agent ${id} not found`);
+  return id;
+}
+
+// /api/agents/:id/<verb>. Only these verbs reach herdr.
 const COMMANDS = {
   "POST prompt": async (id, req) => source.prompt(id, checkPrompt(await readBody(req))),
   "GET read": async (id, req, url) => ({ lines: await source.read(id, checkLines(url.searchParams.get("lines"))) }),
   "POST keys": async (id, req) => source.keys(id, checkKeys(await readBody(req))),
   "POST focus": async (id) => source.focus(id),
+  // Live terminal (PROTOCOL.md "Terminal"). The stream itself is GET term, handled below.
+  "POST term/input": async (id, req) => terms.input(knownAgent(id), checkTermInput(await readBody(req))),
+  "POST term/resize": async (id, req) => {
+    const body = await readBody(req);
+    const { cols, rows } = termSize((k) => body?.[k]);
+    terms.resize(knownAgent(id), cols, rows);
+  },
 };
 
+// SSE stream of one agent's terminal. Errors are reported as JSON before the
+// stream starts, so the client can tell "can't open" from "closed later".
+function openTerm(req, res, url, rawId) {
+  try {
+    const id = knownAgent(decodeURIComponent(rawId));
+    terms.join(id, termSize((k) => url.searchParams.get(k)), req, res);
+  } catch (err) {
+    if (!(err instanceof CommandError)) console.error(err);
+    json(res, err.status ?? 500, { error: err.code ?? "internal", message: err.message });
+  }
+}
+
 async function command(req, res, url) {
-  const m = url.pathname.match(/^\/api\/agents\/([^/]+)\/([a-z]+)$/);
+  const m = url.pathname.match(/^\/api\/agents\/([^/]+)\/([a-z]+(?:\/[a-z]+)?)$/);
+  if (m && req.method === "GET" && m[2] === "term") return openTerm(req, res, url, m[1]);
   const handler = m && COMMANDS[`${req.method} ${m[2]}`];
   if (!handler) return json(res, 404, { error: "not_found", message: `no route ${req.method} ${url.pathname}` });
   try {

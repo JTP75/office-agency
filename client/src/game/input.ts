@@ -1,4 +1,7 @@
-// Keyboard state. Ignores keys while the user is typing in a text field.
+// Keyboard state. Ignores keys while the user is typing in a text field (including the
+// terminal, whose input is xterm's hidden textarea).
+import { closeDrawer, nextBlocked, openAgent, store } from "../state/store";
+
 const held = new Set<string>();
 
 const MOVE_KEYS = new Set(["arrowup", "arrowdown", "arrowleft", "arrowright", "w", "a", "s", "d"]);
@@ -14,6 +17,15 @@ export function installInput() {
     const k = e.key.toLowerCase();
     if (MOVE_KEYS.has(k)) e.preventDefault(); // keep arrows from scrolling or moving focus
     held.add(k);
+    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+    // Agent drawer keys (the terminal has focus while typing, so these never reach a TUI).
+    const s = store.getState();
+    if (k === "e" && s.nearAgent) openAgent(s.nearAgent, "e");
+    else if (k === "escape" && s.drawer) closeDrawer();
+    else if (k === "b") {
+      const next = nextBlocked();
+      if (next) openAgent(next.id, "hud");
+    }
   });
   addEventListener("keyup", (e) => held.delete(e.key.toLowerCase()));
   addEventListener("blur", () => held.clear());

@@ -1,12 +1,13 @@
 // Inside one project's building, drawn with roguelike-indoors furniture.
 // The floor plan is regenerated from the seat book on every snapshot; statics are only
 // rebuilt when the geometry actually changes, and agents keep their desks throughout.
-import { Container, Sprite, Texture } from "pixi.js";
+import { Container, Rectangle, Sprite, Texture } from "pixi.js";
 import type { Agent } from "../../net/protocol";
 import { INDOOR, PAINT, indoor } from "../assets";
 import { AgentView } from "../AgentView";
 import { buildFloorPlan, cellKey, type CellKind, type Decor, type FloorPlan } from "../layout/floorplan";
 import type { SeatBook } from "../layout/seats";
+import { openAgent } from "../../state/store";
 import { makePlaque, truncate } from "../text";
 import { Scene, TILE, type Trigger } from "./Scene";
 
@@ -69,6 +70,12 @@ export class InteriorScene extends Scene {
       let view = this.views.get(a.id);
       if (!view) {
         view = new AgentView(a);
+        // Click an agent to open its terminal drawer from anywhere in the room.
+        view.body.eventMode = "static";
+        view.body.cursor = "pointer";
+        view.body.hitArea = new Rectangle(-10, -38, 20, 38);
+        const id = a.id;
+        view.body.on("pointertap", () => openAgent(id, "click"));
         this.views.set(a.id, view);
         this.actors.addChild(view.body);
         this.under.addChild(view.glow);
@@ -83,6 +90,26 @@ export class InteriorScene extends Scene {
 
   update(time: number) {
     for (const v of this.views.values()) v.update(time);
+  }
+
+  /** Tile distance from (tx, ty) to an agent's seat, or null if it isn't seated here. */
+  distanceTo(agentId: string, tx: number, ty: number) {
+    const seat = this.views.has(agentId) ? this.plan.seatOf.get(agentId) : undefined;
+    return seat ? Math.hypot(seat.x - tx, seat.y - ty) : null;
+  }
+
+  /** The closest seated agent within `radius` tiles of (tx, ty). */
+  agentNear(tx: number, ty: number, radius: number) {
+    let best: string | null = null;
+    let bestD = radius;
+    for (const id of this.views.keys()) {
+      const d = this.distanceTo(id, tx, ty);
+      if (d !== null && d <= bestD) {
+        best = id;
+        bestD = d;
+      }
+    }
+    return best;
   }
 
   // ---- statics ------------------------------------------------------------------------

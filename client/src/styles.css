@@ -97,7 +97,7 @@ body {
 
 .tabs {
   top: 8px;
-  left: 50%;
+  left: calc((100vw - var(--drawer-w, 0px)) / 2);
   transform: translateX(-50%);
   display: flex;
   gap: 4px;
@@ -132,7 +132,16 @@ body {
 .tabs .n {
   opacity: 0.7;
 }
+.tab-group {
+  display: flex;
+  gap: 2px;
+  align-items: stretch;
+}
+.tabs .blocked-badge,
 .blocked-badge {
+  border: 2px solid #b71c1c;
+  font: inherit;
+  cursor: pointer;
   background: #f44336;
   color: #fff;
   border-radius: 8px;
@@ -159,11 +168,134 @@ body {
 
 .notice {
   top: 50%;
-  left: 50%;
+  left: calc((100vw - var(--drawer-w, 0px)) / 2);
   transform: translate(-50%, -50%);
   max-width: 420px;
   text-align: center;
 }
 .notice code {
   color: #ffd54f;
+}
+
+/* ---- agent drawer ----------------------------------------------------------------- */
+
+kbd {
+  border: 1px solid #8a6440;
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  padding: 0 4px;
+  font: inherit;
+  color: #ffd54f;
+}
+
+.near-hint {
+  bottom: 44px;
+  left: calc((100vw - var(--drawer-w, 0px)) / 2);
+  transform: translateX(-50%);
+}
+
+.drawer {
+  position: fixed;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--drawer-w, 45vw);
+  display: flex;
+  flex-direction: column;
+  background: #0d0e12;
+  border-left: 2px solid #3a2a1c;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.5);
+}
+
+.action-strip {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(16, 17, 22, 0.95);
+  border-bottom: 2px solid #3a2a1c;
+}
+.action-strip .who {
+  min-width: 0;
+}
+.action-strip .title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.action-strip .actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.action-strip button,
+.term-overlay button {
+  font: inherit;
+  color: #e6e6e6;
+  background: #16171d;
+  border: 2px solid #3a2a1c;
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.action-strip button:hover:not(:disabled),
+.term-overlay button:hover {
+  border-color: #8a6440;
+}
+.action-strip button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.action-strip button:focus-visible,
+.term-overlay button:focus-visible {
+  outline: 2px solid #ffd54f;
+  outline-offset: 1px;
+}
+
+.status-pill {
+  padding: 0 6px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 11px;
+  color: #fff;
+  background: #7e57c2;
+}
+.status-pill.working { background: #2e7d32; }
+.status-pill.idle { background: #616161; }
+.status-pill.blocked { background: #d32f2f; }
+.status-pill.done { background: #1565c0; }
+
+.typing-bar {
+  padding: 3px 10px;
+  font-size: 11px;
+  color: #9e9e9e;
+  border-bottom: 1px solid #22242c;
+}
+.typing-bar.on {
+  color: #1b1d23;
+  background: #ffd54f;
+}
+
+.term {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 6px;
+}
+.term-host {
+  width: 100%;
+  height: 100%;
+}
+.term-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 12, 16, 0.85);
+  text-align: center;
 }
