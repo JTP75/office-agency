@@ -8,6 +8,12 @@
 //   - status: pane.agent_status_changed needs a pane_id per entry, and one
 //     stale id rejects the whole request, so it's rebuilt whenever the set of
 //     agent panes changes.
+//
+// herdr reports a finished agent as "done" until something marks it seen, and
+// only a herdr client focusing the pane does that (terminal sessions don't count,
+// and agent.focus would yank the user's herdr window). So the office keeps its own
+// seen marks: a completion is seen once a drawer has had that agent open, and a
+// seen "done" is reported as "idle". herdr's completion_seq tells completions apart.
 
 import path from "node:path";
 import { request, subscribe } from "../herdr.mjs";
@@ -36,6 +42,8 @@ export function createHerdrSource({ onDead }) {
   let terminalIds = new Map(); // pane id → herdr terminal id (for the native link-out)
   let places = []; // { project, lobby, worktree, root, checkout, workspace } per agent, for creating agents and worktrees
   let names = new Set(); // live herdr agent names (unique per herdr)
+  const viewing = new Map(); // pane id → open drawer terminals
+  const seenSeq = new Map(); // pane id → last completion_seq seen in a drawer
 
   let refreshing = false;
   let again = false;
@@ -69,11 +77,13 @@ export function createHerdrSource({ onDead }) {
     const ids = raw.map((a) => a.pane_id).sort();
     if (ids.join(",") !== watchedIds) watchStatuses(ids);
 
+    for (const a of raw) if (viewing.has(a.pane_id)) seenSeq.set(a.pane_id, a.completion_seq);
+    for (const id of seenSeq.keys()) if (!ids.includes(id)) seenSeq.delete(id);
     const placed = await Promise.all(
       raw.map(async (a) => ({
         id: a.pane_id,
         kind: a.agent,
-        status: a.agent_status,
+        status: a.agent_status === "done" && seenSeq.has(a.pane_id) && seenSeq.get(a.pane_id) === a.completion_seq ? "idle" : a.agent_status,
         ...(await placeOf(a.foreground_cwd ?? a.cwd)),
         workspace: a.workspace_id,
         tab: a.tab_id,
@@ -208,7 +218,30 @@ export function createHerdrSource({ onDead }) {
       await call("agent.focus", { target: target(id) });
     },
     openTerminal(id, size, events) {
-      return openHerdrTerminal(target(id), size, events);
+      let open = true;
+      const stop = () => {
+        if (!open) return;
+        open = false;
+        const n = viewing.get(id) - 1;
+        if (n > 0) viewing.set(id, n);
+        else viewing.delete(id);
+      };
+      const handle = openHerdrTerminal(target(id), size, {
+        ...events,
+        onClosed(reason) {
+          stop();
+          events.onClosed(reason);
+        },
+      });
+      viewing.set(id, (viewing.get(id) ?? 0) + 1);
+      schedule(); // marks the current completion seen
+      return {
+        ...handle,
+        release() {
+          stop();
+          handle.release();
+        },
+      };
     },
     // New agents get their own tab in the room's workspace, so they never
     // squeeze an existing pane. A tab whose agent didn't start is closed again.
