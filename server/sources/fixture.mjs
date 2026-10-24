@@ -7,7 +7,7 @@
 //   crowded  40 agents in one worktree room, plus a few in the lobby
 //   churn    default, plus agents and a whole project coming and going
 
-import { CommandError } from "./commands.mjs";
+import { CommandError, pickName } from "./commands.mjs";
 import { FakeTerm } from "../term/fake.mjs";
 
 const STATUSES = ["working", "idle", "blocked", "done", "unknown"];
@@ -101,6 +101,15 @@ export function createFixtureSource({ scenario = "default" } = {}) {
     return history.get(agent.id);
   }
 
+  // A new agent shows up idle at its prompt, like a freshly started harness.
+  function arrive([project, worktree, lobby, kind], name) {
+    const title = pickName(kind, name, new Set(agents.map((a) => a.title)));
+    const agent = { ...makeAgent([project, worktree, lobby, kind, title]), status: "idle" };
+    agents = [...agents, agent];
+    emit();
+    return { agent: agent.id, name: title };
+  }
+
   function startWork(agent, note) {
     agent.status = "working";
     lines(agent).push(note, "Working…");
@@ -171,6 +180,17 @@ export function createFixtureSource({ scenario = "default" } = {}) {
     },
     async focus(id) {
       find(id); // nothing to focus in fixture mode
+    },
+    async spawn({ project, lobby, worktree, kind, name }) {
+      const room = agents.find((a) => a.project === project && (lobby ? a.lobby : !a.lobby && a.worktree === worktree));
+      if (!room) throw new CommandError(404, "room_not_found", `no agents in ${project} ${lobby ? "lobby" : worktree} to start next to`);
+      return arrive([project, room.worktree, room.lobby, kind], name);
+    },
+    async createWorktree({ project, branch, kind, name }) {
+      if (!agents.some((a) => a.project === project)) throw new CommandError(404, "room_not_found", `no project ${project}`);
+      if (agents.some((a) => a.project === project && a.worktree === branch))
+        throw new CommandError(409, "worktree_exists", `${branch} is already checked out in ${project}`);
+      return arrive([project, branch, false, kind], name);
     },
     openTerminal(id, { cols, rows }, { onFrame, onClosed }) {
       const agent = find(id);

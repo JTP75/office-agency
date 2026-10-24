@@ -55,3 +55,56 @@ export function checkTermScroll(body) {
   }
   return out;
 }
+
+// Harnesses `herdr agent start --kind` accepts (herdr 0.9.3).
+export const AGENT_KINDS = ["claude", "codex", "opencode", "gemini", "cursor", "copilot", "amp", "pi", "devin", "agy", "cline", "omp", "mastracode", "kimi", "kiro", "droid", "grok", "hermes", "kilo", "qodercli", "qwen", "letta", "maki", "muse"];
+
+// herdr's rule for agent names: `[a-z][a-z0-9_-]{0,31}`, unique among live agents.
+const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+
+function checkKindAndName(body) {
+  const kind = body?.kind;
+  if (!AGENT_KINDS.includes(kind)) throw new CommandError(400, "bad_request", `kind must be one of: ${AGENT_KINDS.join(", ")}`);
+  const name = body?.name == null || body.name === "" ? null : body.name;
+  if (name !== null && (typeof name !== "string" || !AGENT_NAME.test(name)))
+    throw new CommandError(400, "bad_request", "name must be lowercase letters, digits, - or _, starting with a letter (max 32)");
+  return { kind, name };
+}
+
+function checkProject(body) {
+  if (typeof body?.project !== "string" || !body.project) throw new CommandError(400, "bad_request", "project must be a non-empty string");
+  return body.project;
+}
+
+/** `POST /api/agents`: a new agent in an existing room (the lobby, or a worktree by branch). */
+export function checkSpawn(body) {
+  const project = checkProject(body);
+  const lobby = body?.lobby === true;
+  const worktree = lobby ? null : body?.worktree;
+  if (!lobby && (typeof worktree !== "string" || !worktree)) throw new CommandError(400, "bad_request", "pass lobby: true or a worktree");
+  return { project, lobby, worktree, ...checkKindAndName(body) };
+}
+
+// Enough to keep obviously broken names away from git; git has the final say.
+function checkRef(ref, what) {
+  if (typeof ref !== "string" || !ref || ref.length > 200 || /[\s~^:?*[\\]|\.\.|^[-/]|[/.]$|@\{/.test(ref))
+    throw new CommandError(400, "bad_request", `${what} is not a valid git ref name`);
+  return ref;
+}
+
+/** `POST /api/worktrees`: a new worktree (room) in a project, with its first agent. */
+export function checkWorktree(body) {
+  const project = checkProject(body);
+  const branch = checkRef(body?.branch, "branch");
+  const base = body?.base == null || body.base === "" ? null : checkRef(body.base, "base");
+  return { project, branch, base, ...checkKindAndName(body) };
+}
+
+/** `name`, or the first free `<kind>-<n>`. */
+export function pickName(kind, name, taken) {
+  if (name) {
+    if (taken.has(name)) throw new CommandError(409, "name_taken", `an agent named ${name} is already running`);
+    return name;
+  }
+  for (let n = 1; ; n++) if (!taken.has(`${kind}-${n}`)) return `${kind}-${n}`;
+}

@@ -299,3 +299,78 @@ kbd {
   background: rgba(11, 12, 16, 0.85);
   text-align: center;
 }
+
+/* ---- create agent / worktree ------------------------------------------------------ */
+
+/* In the status panel while inside a building. */
+.create-bar {
+  margin-top: 6px;
+  gap: 4px;
+}
+.create-bar button,
+.create-form button {
+  font: inherit;
+  color: #e6e6e6;
+  background: rgba(16, 17, 22, 0.82);
+  border: 2px solid #3a2a1c;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.create-bar button:hover,
+.create-form button:hover:not(:disabled) {
+  border-color: #8a6440;
+}
+.create-bar button:focus-visible,
+.create-form button:focus-visible,
+.create-form input:focus-visible,
+.create-form select:focus-visible {
+  outline: 2px solid #ffd54f;
+  outline-offset: 1px;
+}
+.create-form button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.create-form button.primary {
+  background: #f4e7c5;
+  color: #2b2116;
+  border-color: #8a6440;
+}
+
+.create-form {
+  z-index: 3;
+  top: 50%;
+  left: calc((100vw - var(--drawer-w, 0px)) / 2);
+  transform: translate(-50%, -50%);
+  width: min(340px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 12px 14px;
+}
+.create-form form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.create-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.create-form input,
+.create-form select {
+  font: inherit;
+  color: #e6e6e6;
+  background: #0b0c10;
+  border: 2px solid #3a2a1c;
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+.create-form .error {
+  color: #ff8a80;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.create-form .buttons {
+  justify-content: flex-end;
+}

@@ -1,7 +1,7 @@
 // Screen-fixed UI over the canvas. Agent text is rendered by React as text (escaped), never as HTML.
 import type { MouseEvent } from "react";
 import { STATUSES, type AgentStatus } from "../net/protocol";
-import { nextBlocked, openAgent, requestTravel, useOffice, type Location } from "../state/store";
+import { nextBlocked, openAgent, openCreateForm, requestTravel, useOffice, type Location } from "../state/store";
 
 const STATUS_CSS: Record<AgentStatus, string> = {
   working: "#4caf50",
@@ -53,6 +53,30 @@ export function Hud() {
         <div className="muted">
           {here} · {renderer}
         </div>
+        {location.kind === "building" && (
+          <div className="row create-bar" role="group" aria-label={`Create in ${location.project}`}>
+            <button
+              type="button"
+              onClick={(e) => {
+                blur(e);
+                openCreateForm({ kind: "agent", project: location.project });
+              }}
+              title="Start a new agent in one of this building's rooms"
+            >
+              + Agent
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                blur(e);
+                openCreateForm({ kind: "worktree", project: location.project });
+              }}
+              title="Create a git worktree (a new room) with an agent in it"
+            >
+              + Worktree
+            </button>
+          </div>
+        )}
       </section>
 
       <nav className="hud tabs" aria-label="Buildings">

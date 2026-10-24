@@ -74,6 +74,34 @@ Allowed keys: `esc` `enter` `tab` `shift+tab` `up` `down` `left` `right` `space`
 
 A prompt's effect shows up as a status change in the next snapshot (usually `working`), not in the response.
 
+## Create
+
+Start new agents from the office. Both calls return once the agent is running (herdr has detected the harness in its pane), which can take a few seconds, so show a busy state. The new agent then appears in the next snapshot; the response's `agent` is its `id`, so the client can open its drawer when it shows up.
+
+| Call | Body | Success | Does |
+| --- | --- | --- | --- |
+| `POST /api/agents` | `{ "project", "lobby": true }` or `{ "project", "worktree": "<branch>" }`, plus `"kind"` and optional `"name"` | `{ ok, agent, name }` | Starts an agent in an existing room, in a new herdr tab of that room's workspace |
+| `POST /api/worktrees` | `{ "project", "branch", "base"?, "kind", "name"? }` | `{ ok, agent, name }` | Creates a git worktree (a new **room**) via `herdr worktree create` and starts its first agent there |
+
+- `kind` is one of the harnesses in `kinds` from `/api/ping`.
+- `name` is the herdr agent name: `[a-z][a-z0-9_-]{0,31}`, unique among live agents. Leave it out to get the first free `<kind>-<n>`.
+- `base` is the ref the new branch starts from (default: the repo's current HEAD). An existing branch is checked out instead of created.
+- A room only exists while it has an agent, so these target rooms and projects seen in the current snapshot, and a new worktree always comes with its first agent.
+
+| Status | `error` | Meaning |
+| --- | --- | --- |
+| 400 | `bad_request` | Bad kind, name, branch or room |
+| 404 | `room_not_found` | No agent in that room / project any more (or the project isn't a git repo, for worktrees) |
+| 409 | `name_taken` | Another live agent has that name |
+| 409 | `worktree_exists` | (fixture) that branch already has a room |
+| 502 | `agent_start_failed` | The harness exited right away, e.g. not installed; `message` has the shell's last line. The tab opened for it is closed again |
+| 504 | `agent_start_failed` | herdr didn't detect the harness within 30 s |
+| 502 | other herdr codes | e.g. `worktree_create_failed` with git's message (branch already checked out, unknown base) |
+
+If a worktree is created but its agent fails to start, the worktree and its herdr workspace are kept (the error message says so); there is no room for it in the office until an agent runs there.
+
+**Fixture mode** simulates both: the new agent arrives `idle`, and creating a worktree whose branch already has a room is `409 worktree_exists`.
+
 ## Terminal
 
 A live view of an agent's real terminal, so every harness's TUI works in the office. One session per agent is shared by every viewer. It opens on the first viewer; when the last one disconnects it stays open for a couple of seconds before it is released, so a drawer that closes and reopens (E, a remount, a reload) reuses the same session instead of opening a second control process. Opening takes control automatically: anyone else controlling that pane (another tab, a native terminal window) loses it.
@@ -111,7 +139,7 @@ The app comes from `config.json` in the plugin's config directory (`herdr plugin
 
 ## Ping: `GET /api/ping?t=<token>`
 
-`200 { "ok": true, "source": "herdr", "nativeTerminal": "Ghostty" }` with a valid token (`nativeTerminal` is null when the link-out isn't available), `401` with a stale one. Use it when the event stream errors: a network error means the server is down (keep retrying); a `401` means the server restarted with a new token, so this tab is dead. Tell the user to reopen the office from herdr.
+`200 { "ok": true, "source": "herdr", "nativeTerminal": "Ghostty", "kinds": ["claude", "codex", …] }` with a valid token (`nativeTerminal` is null when the link-out isn't available; `kinds` are the harnesses "Create" accepts), `401` with a stale one. Use it when the event stream errors: a network error means the server is down (keep retrying); a `401` means the server restarted with a new token, so this tab is dead. Tell the user to reopen the office from herdr.
 
 ## Fixture scenarios
 

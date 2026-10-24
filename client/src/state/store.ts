@@ -11,6 +11,9 @@ export type Location = { kind: "street" } | { kind: "building"; project: string 
 /** How the agent drawer was opened. Only an "e" drawer closes when you walk away. */
 export type OpenedBy = "e" | "click" | "hud";
 
+/** The "new agent" / "new worktree" form, for one building. */
+export type CreateForm = { kind: "agent" | "worktree"; project: string };
+
 export interface OfficeState {
   connection: Connection;
   source: string | null;
@@ -29,6 +32,11 @@ export interface OfficeState {
   typing: boolean;
   /** Native terminal app for the link-out (e.g. "Ghostty"), or null if unavailable. */
   nativeTerminal: string | null;
+  /** Harnesses the server can start (`kinds` from /api/ping). */
+  kinds: string[];
+  createForm: CreateForm | null;
+  /** A just-created agent: its drawer opens as soon as a snapshot includes it. */
+  openWhenSeen: string | null;
 }
 
 export const store = createStore<OfficeState>(() => ({
@@ -43,6 +51,9 @@ export const store = createStore<OfficeState>(() => ({
   nearAgent: null,
   typing: false,
   nativeTerminal: null,
+  kinds: [],
+  createForm: null,
+  openWhenSeen: null,
 }));
 
 export function applySnapshot(source: string, agents: Agent[]) {
@@ -56,6 +67,11 @@ export function applySnapshot(source: string, agents: Agent[]) {
     }
   }
   store.setState({ source, agents, projects, connection: "live" });
+  const pending = store.getState().openWhenSeen;
+  if (pending && agents.some((a) => a.id === pending)) {
+    store.setState({ openWhenSeen: null });
+    openAgent(pending, "hud");
+  }
 }
 
 export function requestTravel(to: Location) {
@@ -69,6 +85,14 @@ export function openAgent(agentId: string, openedBy: OpenedBy) {
   if (!agent) return;
   if (location.kind !== "building" || location.project !== agent.project) requestTravel({ kind: "building", project: agent.project });
   store.setState({ drawer: { agentId, openedBy } });
+}
+
+export function openCreateForm(form: CreateForm) {
+  store.setState({ createForm: form });
+}
+
+export function closeCreateForm() {
+  store.setState({ createForm: null });
 }
 
 export function closeDrawer() {
@@ -88,4 +112,22 @@ export const useOffice = <T,>(selector: (s: OfficeState) => T) => useStore(store
 
 export function agentsIn(agents: Agent[], project: string) {
   return agents.filter((a) => a.project === project);
+}
+
+/** A room an agent can be started in: the lobby, or a worktree by branch. */
+export interface Room {
+  lobby: boolean;
+  worktree: string | null;
+}
+
+export const roomKey = (r: Room) => (r.lobby ? "lobby" : `wt:${r.worktree}`);
+
+/** The building's rooms that have agents, lobby first. */
+export function roomsIn(agents: Agent[], project: string): Room[] {
+  const rooms = new Map<string, Room>();
+  for (const a of agentsIn(agents, project)) {
+    const room = { lobby: a.lobby, worktree: a.worktree };
+    rooms.set(roomKey(room), room);
+  }
+  return [...rooms.values()].sort((a, b) => Number(b.lobby) - Number(a.lobby) || (a.worktree ?? "").localeCompare(b.worktree ?? ""));
 }
