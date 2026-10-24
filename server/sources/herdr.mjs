@@ -10,6 +10,12 @@
 //   - status: pane.agent_status_changed needs a pane_id per entry, and one
 //     stale id rejects the whole request, so it's rebuilt whenever the set of
 //     agent panes changes.
+//
+// herdr reports a finished agent as "done" until something marks it seen, and
+// only a herdr client focusing the pane does that (terminal sessions don't count,
+// and agent.focus would yank the user's herdr window). So the office keeps its own
+// seen marks: a completion is seen once a drawer has had that agent open, and a
+// seen "done" is reported as "idle". herdr's completion_seq tells completions apart.
 
 import { SOCKET_PATH, request as rawRequest, subscribe as rawSubscribe } from "../herdr.mjs";
 import { placeOf as gitPlaceOf } from "./git.mjs";
@@ -45,6 +51,8 @@ export function createHerdrSource({ socketPath = SOCKET_PATH, placeOf = gitPlace
   let known = new Set();
   let agents = [];
   let names = new Set(); // live herdr agent names (unique per herdr server)
+  const viewing = new Map(); // pane id → open drawer terminals
+  const seenSeq = new Map(); // pane id → last completion_seq seen in a drawer
 
   let refreshing = false;
   let again = false;
@@ -78,11 +86,13 @@ export function createHerdrSource({ socketPath = SOCKET_PATH, placeOf = gitPlace
     const ids = raw.map((a) => a.pane_id).sort();
     if (ids.join(",") !== watchedIds) watchStatuses(ids);
 
+    for (const a of raw) if (viewing.has(a.pane_id)) seenSeq.set(a.pane_id, a.completion_seq);
+    for (const id of seenSeq.keys()) if (!ids.includes(id)) seenSeq.delete(id);
     agents = await Promise.all(
       raw.map(async (a) => ({
         pane: a.pane_id,
         kind: a.agent,
-        status: a.agent_status,
+        status: a.agent_status === "done" && seenSeq.has(a.pane_id) && seenSeq.get(a.pane_id) === a.completion_seq ? "idle" : a.agent_status,
         ...(await placeOf(a.foreground_cwd ?? a.cwd)),
         workspace: a.workspace_id,
         tab: a.tab_id,
@@ -220,7 +230,35 @@ export function createHerdrSource({ socketPath = SOCKET_PATH, placeOf = gitPlace
       await call("agent.focus", { target: target(pane) });
     },
     openTerminal(pane, size, events) {
-      return openHerdrTerminal(target(pane), size, events, { socketPath });
+      let open = true;
+      const stop = () => {
+        if (!open) return;
+        open = false;
+        const n = viewing.get(pane) - 1;
+        if (n > 0) viewing.set(pane, n);
+        else viewing.delete(pane);
+      };
+      const handle = openHerdrTerminal(
+        target(pane),
+        size,
+        {
+          ...events,
+          onClosed(reason) {
+            stop();
+            events.onClosed(reason);
+          },
+        },
+        { socketPath },
+      );
+      viewing.set(pane, (viewing.get(pane) ?? 0) + 1);
+      schedule(); // marks the current completion seen
+      return {
+        ...handle,
+        release() {
+          stop();
+          handle.release();
+        },
+      };
     },
     terminalOf(pane) {
       const agent = agents.find((a) => a.pane === target(pane));
