@@ -42,6 +42,12 @@ async function readEvents(res: Response, onEvent: (ev: Frame | Closed) => void) 
   }
 }
 
+function describe(reason: string) {
+  if (reason === "agent gone") return "This agent's session ended.";
+  if (/taken over/.test(reason)) return "Control moved to another window (a native terminal or another tab). Reconnect to take it back.";
+  return `Terminal closed: ${reason}`;
+}
+
 export function TerminalView({ agentId }: { agentId: string }) {
   const host = useRef<HTMLDivElement>(null);
   const [ended, setEnded] = useState<string | null>(null);
@@ -150,7 +156,7 @@ export function TerminalView({ agentId }: { agentId: string }) {
       <div className="term-host" ref={host} />
       {ended && (
         <div className="term-overlay" role="status">
-          <p>{ended === "agent gone" ? "This agent's session ended." : `Terminal closed: ${ended}`}</p>
+          <p>{describe(ended)}</p>
           {ended !== "agent gone" && (
             <button type="button" onClick={() => setAttempt((n) => n + 1)}>
               Reconnect

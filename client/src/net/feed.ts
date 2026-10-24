@@ -8,6 +8,10 @@ export function connectFeed() {
     store.setState({ connection: "no-token" });
     return;
   }
+  fetch(`/api/ping?t=${encodeURIComponent(token)}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((p) => store.setState({ nativeTerminal: typeof p?.nativeTerminal === "string" ? p.nativeTerminal : null }))
+    .catch(() => {});
   const events = new EventSource(`/api/events?t=${encodeURIComponent(token)}`);
   events.onopen = () => store.setState({ connection: "live" });
   events.onerror = () => store.setState({ connection: "retrying" });

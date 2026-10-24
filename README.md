@@ -40,6 +40,18 @@ Press it: a small server starts in the background and your browser opens the off
 
 The server listens on `127.0.0.1` only, and every API call needs the token.
 
+## Talking to agents
+
+Walk up to an agent and press **E**, click it, or press **B** for the next blocked one: a drawer opens with that agent's live terminal. Type straight into its TUI; **Ctrl+]** or a click on the office goes back to walking, and **Esc** closes the drawer.
+
+The drawer's **Ghostty ↗** button opens the agent in a native terminal instead. To use another app, put this in `$(herdr plugin config-dir office-agency)/config.json`:
+
+```json
+{ "terminal": "kitty" }
+```
+
+Supported: `ghostty` (default), `kitty`, `terminal` (macOS Terminal.app).
+
 ## Uninstall
 
 ```bash

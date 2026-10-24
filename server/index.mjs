@@ -19,6 +19,7 @@ import { openBrowser } from "./browser.mjs";
 import { readOffice, pickPort, writeOffice, onShutdown, shutdown } from "./lifecycle.mjs";
 import { CommandError, checkKeys, checkLines, checkPrompt } from "./sources/commands.mjs";
 import { createTermHub } from "./term/hub.mjs";
+import { nativeTerminal } from "./term/herdr-term.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // The client is served from its Vite build. Checked per request, so building
@@ -139,6 +140,10 @@ const COMMANDS = {
   "GET read": async (id, req, url) => ({ lines: await source.read(id, checkLines(url.searchParams.get("lines"))) }),
   "POST keys": async (id, req) => source.keys(id, checkKeys(await readBody(req))),
   "POST focus": async (id) => source.focus(id),
+  "POST open-native": async (id) => {
+    if (!source.openNative) throw new CommandError(501, "not_supported", "native terminals need herdr mode");
+    return source.openNative(knownAgent(id));
+  },
   // Live terminal (PROTOCOL.md "Terminal"). The stream itself is GET term, handled below.
   "POST term/input": async (id, req) => terms.input(knownAgent(id), checkTermInput(await readBody(req))),
   "POST term/resize": async (id, req) => {
@@ -161,7 +166,7 @@ function openTerm(req, res, url, rawId) {
 }
 
 async function command(req, res, url) {
-  const m = url.pathname.match(/^\/api\/agents\/([^/]+)\/([a-z]+(?:\/[a-z]+)?)$/);
+  const m = url.pathname.match(/^\/api\/agents\/([^/]+)\/([a-z-]+(?:\/[a-z-]+)?)$/);
   if (m && req.method === "GET" && m[2] === "term") return openTerm(req, res, url, m[1]);
   const handler = m && COMMANDS[`${req.method} ${m[2]}`];
   if (!handler) return json(res, 404, { error: "not_found", message: `no route ${req.method} ${url.pathname}` });
@@ -193,7 +198,8 @@ const server = http.createServer((req, res) => {
     }
     // Lets the client tell "server down" (network error) from "server restarted
     // with a new token" (401), which EventSource can't distinguish.
-    if (url.pathname === "/api/ping") return json(res, 200, { ok: true, source: sourceName });
+    if (url.pathname === "/api/ping")
+      return json(res, 200, { ok: true, source: sourceName, nativeTerminal: sourceName === "herdr" ? (nativeTerminal()?.label ?? null) : null });
     if (url.pathname.startsWith("/api/agents/")) return command(req, res, url);
     return notFound(res);
   }

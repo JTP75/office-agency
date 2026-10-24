@@ -10,6 +10,7 @@ export function AgentDrawer() {
   const drawer = useOffice((s) => s.drawer);
   const agent = useOffice((s) => s.agents.find((a) => a.id === s.drawer?.agentId));
   const typing = useOffice((s) => s.typing);
+  const nativeTerminal = useOffice((s) => s.nativeTerminal);
   const [note, setNote] = useState<string | null>(null);
 
   // Publish the drawer width for CSS (HUD centering); the camera reads the same function.
@@ -25,6 +26,11 @@ export function AgentDrawer() {
   if (!drawer) return <NearHint />;
   const id = drawer.agentId;
   const where = agent ? (agent.lobby ? `${agent.project} · lobby` : `${agent.project} @ ${agent.worktree ?? "(no branch)"}`) : "";
+
+  const openNative = () =>
+    post(agentPath(id, "open-native"))
+      .then(() => setNote(`Opened in ${nativeTerminal}; it now has control`))
+      .catch((e: Error) => setNote(e.message));
 
   const focusInHerdr = () =>
     post(agentPath(id, "focus"))
@@ -47,8 +53,13 @@ export function AgentDrawer() {
           <button type="button" onClick={focusInHerdr} title="Jump to this agent's pane in herdr">
             herdr ↗
           </button>
-          <button type="button" disabled title="Open in a native terminal: arrives with the live herdr connection">
-            Ghostty ↗
+          <button
+            type="button"
+            disabled={!nativeTerminal}
+            onClick={openNative}
+            title={nativeTerminal ? `Open this agent in ${nativeTerminal} (takes control from the drawer)` : "Native terminals need herdr mode"}
+          >
+            {nativeTerminal ?? "Native"} ↗
           </button>
           <button type="button" className="close" onClick={closeDrawer} aria-label="Close drawer">
             ✕

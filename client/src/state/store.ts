@@ -27,6 +27,8 @@ export interface OfficeState {
   nearAgent: string | null;
   /** Keyboard focus is in the terminal: the game ignores keys. */
   typing: boolean;
+  /** Native terminal app for the link-out (e.g. "Ghostty"), or null if unavailable. */
+  nativeTerminal: string | null;
 }
 
 export const store = createStore<OfficeState>(() => ({
@@ -40,6 +42,7 @@ export const store = createStore<OfficeState>(() => ({
   drawer: null,
   nearAgent: null,
   typing: false,
+  nativeTerminal: null,
 }));
 
 export function applySnapshot(source: string, agents: Agent[]) {

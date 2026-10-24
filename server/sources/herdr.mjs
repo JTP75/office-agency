@@ -13,6 +13,7 @@ import path from "node:path";
 import { request, subscribe } from "../herdr.mjs";
 import { placeOf } from "./git.mjs";
 import { CommandError } from "./commands.mjs";
+import { openHerdrTerminal, openNative } from "../term/herdr-term.mjs";
 
 const LIFECYCLE = ["pane.created", "pane.closed", "pane.updated", "pane.moved", "pane.agent_detected"];
 const SAFETY_POLL_MS = 5000;
@@ -29,6 +30,7 @@ export function createHerdrSource({ onDead }) {
   let statusSub = null;
   let closed = false;
   let known = new Set();
+  let terminalIds = new Map(); // pane id → herdr terminal id (for the native link-out)
 
   let refreshing = false;
   let again = false;
@@ -75,6 +77,7 @@ export function createHerdrSource({ onDead }) {
     );
     const agents = uniqueProjects(placed);
     known = new Set(agents.map((a) => a.id));
+    terminalIds = new Map(raw.map((a) => [a.pane_id, a.terminal_id]));
     const snapshot = { type: "snapshot", source: "herdr", agents };
     const json = JSON.stringify(snapshot);
     if (json === last) return;
@@ -162,8 +165,13 @@ export function createHerdrSource({ onDead }) {
     async focus(id) {
       await call("agent.focus", { target: target(id) });
     },
-    openTerminal() {
-      throw new CommandError(501, "not_implemented", "live herdr terminals arrive in the next change; use --source fixture");
+    openTerminal(id, size, events) {
+      return openHerdrTerminal(target(id), size, events);
+    },
+    async openNative(id) {
+      const terminalId = terminalIds.get(target(id));
+      if (!terminalId) throw new CommandError(404, "agent_not_found", `no terminal for ${id}`);
+      return openNative(terminalId);
     },
     close: () => {
       closed = true;

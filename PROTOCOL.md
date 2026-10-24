@@ -98,11 +98,17 @@ Stream events:
 
 **Fixture mode** runs a small fake agent TUI per agent: a transcript, a `❯` prompt line, and a numbered dialog while blocked. Typing echoes; Enter sends through the same path as `prompt` (status goes working → done); `1`/`y`/Enter or `2`/`n` answers a dialog; Esc cancels it.
 
-**herdr mode** is the next change: the same events, from `herdr terminal session control --takeover`. Until then the stream returns `501 not_implemented`.
+**herdr mode** streams the agent's real terminal (`herdr terminal session control --takeover`), so every harness's TUI works, menus and dialogs included. While the stream is open, the agent's pane takes your `cols`×`rows`; when the last viewer leaves, control is released and an attached herdr window gets its own size back.
+
+### Native terminal: `POST /api/agents/:id/open-native`
+
+Opens the agent in a native terminal window (`herdr terminal attach <terminal_id> --takeover`). That window takes control, so an open stream gets `closed` with `terminal attach taken over`; opening the stream again takes it back. Returns `{ ok, terminal: "Ghostty" }`; `501 not_supported` in fixture mode or with no supported app.
+
+The app comes from `config.json` in the plugin's config directory (`herdr plugin config-dir office-agency`): `{ "terminal": "ghostty" | "kitty" | "terminal" }`, default `ghostty` (`terminal` = macOS Terminal.app).
 
 ## Ping: `GET /api/ping?t=<token>`
 
-`200 { "ok": true, "source": "herdr" }` with a valid token, `401` with a stale one. Use it when the event stream errors: a network error means the server is down (keep retrying); a `401` means the server restarted with a new token, so this tab is dead. Tell the user to reopen the office from herdr.
+`200 { "ok": true, "source": "herdr", "nativeTerminal": "Ghostty" }` with a valid token (`nativeTerminal` is null when the link-out isn't available), `401` with a stale one. Use it when the event stream errors: a network error means the server is down (keep retrying); a `401` means the server restarted with a new token, so this tab is dead. Tell the user to reopen the office from herdr.
 
 ## Fixture scenarios
 
