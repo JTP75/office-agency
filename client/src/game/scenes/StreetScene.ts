@@ -3,7 +3,7 @@
 // its name, and a roof-top summary of who's inside.
 import { Container, Graphics, Sprite } from "pixi.js";
 import type { Agent } from "../../net/protocol";
-import { CITY, city } from "../assets";
+import { CITY, PAINT, city } from "../assets";
 import { STATUS_COLOR } from "../AgentView";
 import { BUILDING_W, buildStreet, type StreetPlan } from "../layout/street";
 import { makePlaque, makeText, truncate } from "../text";
@@ -72,15 +72,14 @@ export class StreetScene extends Scene {
     return s;
   }
 
-  private groundAt(x: number, y: number) {
+  /** A grass tile everywhere but the road (which is painted, see below). */
+  private grassAt(x: number, y: number) {
     const h = (x * 73 + y * 151) % 11;
-    if (y <= 1 || y >= 15) return h === 0 ? CITY.grassFlowers : h < 3 ? CITY.grassDots : CITY.grass;
-    if (y === 9) return CITY.sidewalkAboveRoad;
-    if (y === 10) return CITY.roadTop;
-    if (y === 11) return CITY.road;
-    if (y === 12) return CITY.roadBottom;
-    if (y === 13) return CITY.sidewalkBelowRoad;
-    return CITY.sidewalk;
+    return h === 0 ? CITY.grassFlowers : h < 3 ? CITY.grassDots : CITY.grass;
+  }
+
+  private roadAt(y: number) {
+    return y === 10 ? PAINT.roadTop : y === 11 ? PAINT.road : y === 12 ? PAINT.roadBottom : null;
   }
 
   private rebuild() {
@@ -89,9 +88,20 @@ export class StreetScene extends Scene {
     this.staticActors = [];
     this.solids.clear();
     this.doors.clear();
-    const { width, height, lots, trees, cars } = this.plan;
+    const { width, height, lots, trees, bushes } = this.plan;
 
-    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) this.sprite(this.groundAt(x, y), x, y, this.floor);
+    for (let y = 0; y < height; y++)
+      for (let x = 0; x < width; x++) {
+        const road = this.roadAt(y);
+        if (!road) {
+          this.sprite(this.grassAt(x, y), x, y, this.floor);
+          continue;
+        }
+        const s = new Sprite(road);
+        s.scale.set(2);
+        s.position.set(x * TILE, y * TILE);
+        this.floor.addChild(s);
+      }
 
     lots.forEach((lot, i) => {
       const b = new Container();
@@ -121,14 +131,14 @@ export class StreetScene extends Scene {
       this.solids.add(key(t.x, t.y + 1));
     }
 
-    for (const car of cars) {
+    for (const b of bushes) {
       const c = new Container();
-      this.sprite(CITY.cars[car.v % CITY.cars.length], 0, 0, c);
-      c.position.set(car.x * TILE, car.y * TILE);
-      c.zIndex = (car.y + 1) * TILE;
+      this.sprite(CITY.bush, 0, 0, c);
+      c.position.set(b.x * TILE, b.y * TILE);
+      c.zIndex = (b.y + 1) * TILE;
       this.actors.addChild(c);
       this.staticActors.push(c);
-      this.solids.add(key(car.x, car.y));
+      this.solids.add(key(b.x, b.y));
     }
   }
 

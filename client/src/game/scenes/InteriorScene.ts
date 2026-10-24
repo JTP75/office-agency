@@ -126,7 +126,7 @@ export class InteriorScene extends Scene {
     for (const c of this.staticActors) c.destroy({ children: true });
     this.staticActors = [];
     this.solids.clear();
-    const { cells, desks, decor, rooms } = this.plan;
+    const { cells, desks, monitors, decor, rooms } = this.plan;
 
     const isOpen = (x: number, y: number) => {
       const c = cells.get(cellKey(x, y));
@@ -144,20 +144,28 @@ export class InteriorScene extends Scene {
       }
     }
 
-    // Desks: a 3-tile desk with a monitor; the seat tile above it holds the chair.
+    // Desks: horizontal runs of desk tiles, each piece its own y-sorted sprite.
     for (const d of desks) {
       const desk = new Container();
-      INDOOR.desk.forEach((id, i) => this.tile(indoor(id), i, 0, desk));
-      // Monitor off to the side so it never hides the agent's face.
-      const mon = this.tile(indoor(INDOOR.monitor), 2, 0, desk);
-      mon.y = -9;
+      this.tile(indoor(INDOOR.desk[d.piece]), 0, 0, desk);
       desk.position.set(d.x * TILE, d.y * TILE);
       desk.zIndex = (d.y + 1) * TILE;
       this.actors.addChild(desk);
       this.staticActors.push(desk);
-      for (let i = 0; i < 3; i++) this.solids.add(cellKey(d.x + i, d.y));
-      this.solids.add(cellKey(d.x + 1, d.y - 1)); // the chair
+      this.solids.add(cellKey(d.x, d.y));
     }
+    // A monitor in front of each seat: its screen when the agent has its back to us
+    // or is side-on, its back when the agent faces us.
+    for (const m of monitors) {
+      const mon = new Container();
+      const s = this.tile(indoor(m.face === "down" ? INDOOR.monitorBack : INDOOR.monitorFront), 0, 0, mon);
+      s.y = -7;
+      mon.position.set(m.x * TILE, m.y * TILE);
+      mon.zIndex = (m.y + 1) * TILE + 0.5;
+      this.actors.addChild(mon);
+      this.staticActors.push(mon);
+    }
+    for (const r of [...rooms, this.plan.lobby]) for (const seat of r.seats) this.solids.add(cellKey(seat.x, seat.y));
 
     for (const d of decor) this.placeDecor(d);
   }

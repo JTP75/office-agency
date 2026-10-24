@@ -1,21 +1,31 @@
 // Generates a building interior from the seat book. Pure data, no rendering.
 //
 //          ┌── room ──┐┌── room ──┐        rooms (one per worktree) sit north of the
-//          │  desks ↑ ││  desks ↑ │        corridor and grow upward, so adding a row
-//          └────D─────┘└────D─────┘        never moves the desks nearest the door
+//          │  bands ↑ ││  bands ↑ │        corridor and grow upward a band at a time
+//          └────D─────┘└────D─────┘        (see bands.ts), so seats never move
 //          ═══════════ corridor ══════════  (y = 0..2)
-//          │   lobby desks ↓              │ lobby grows downward toward the exit
+//          │   lobby bands ↓              │ lobby grows downward toward the exit
 //          └──────────── X ───────────────┘ X = exit back to the street
 //
 // Coordinates are tiles. y = -1 is the wall between rooms and corridor.
+import { BAND_W, bandsFor, deskTiles, monitorTile, type Face } from "./bands";
 import { LOBBY_KEY, type SeatBook } from "./seats";
 
 export type CellKind = "floor" | "roomFloor" | "wall" | "door" | "exit";
 
 export interface Seat {
-  /** Tile the agent sits on. The desk is the 3 tiles below-left..below-right. */
+  /** Tile the agent sits on. */
   x: number;
   y: number;
+  /** Which way the agent faces; its desk is in front of it (bands.ts). */
+  face: Face;
+}
+
+/** One desk tile. Horizontal runs of desk tiles are drawn as one long desk. */
+export interface DeskTile {
+  x: number;
+  y: number;
+  piece: "left" | "mid" | "right" | "single";
 }
 
 export interface RoomPlan {
@@ -47,8 +57,10 @@ export interface FloorPlan {
   rooms: RoomPlan[];
   lobby: RoomPlan;
   decor: Decor[];
-  /** Desk tiles (3 wide) as their left tile; solid. */
-  desks: Seat[];
+  /** Desk tiles for occupied (or vacated) seats; solid. */
+  desks: DeskTile[];
+  /** A monitor on the desk in front of each seat, facing that seat. */
+  monitors: { x: number; y: number; face: Face }[];
   exit: { x: number; y: number };
   spawn: { x: number; y: number };
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
@@ -57,66 +69,68 @@ export interface FloorPlan {
   geometryKey: string;
 }
 
-export const SLOT_W = 3;
-export const SLOT_H = 3;
-export const ROOM_COLS = 3;
-export const LOBBY_COLS = 4;
-const ROOM_W = ROOM_COLS * SLOT_W + 2; // interior width
-const LOBBY_MIN_W = LOBBY_COLS * SLOT_W + 2;
+const ROOM_W = BAND_W; // interior width
+const LOBBY_X = 2; // lobby bands start here, leaving a walkway along the west wall
+const LOBBY_TOP = 4; // first lobby band row; rows 0-3 stay open below the corridor
+const LOBBY_MIN_W = LOBBY_X + BAND_W + 1;
 
 export const cellKey = (x: number, y: number) => `${x},${y}`;
 
 export function buildFloorPlan(book: SeatBook): FloorPlan {
   const cells = new Map<string, CellKind>();
   const decor: Decor[] = [];
-  const desks: Seat[] = [];
+  const deskSet = new Set<string>();
+  const monitors: FloorPlan["monitors"] = [];
   const seatOf = new Map<string, Seat>();
   const set = (x: number, y: number, k: CellKind) => cells.set(cellKey(x, y), k);
   const fill = (x0: number, y0: number, x1: number, y1: number, k: CellKind) => {
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) set(x, y, k);
   };
 
-  const seatAt = (slots: (string | null)[], i: number, seat: Seat) => {
-    const id = slots[i];
-    if (id) seatOf.set(id, seat);
+  /**
+   * Lay out `slots` in bands starting at column `x0`. Bands stack downward from `top`
+   * (lobby) or upward from `bottom` (rooms). Returns the seats used and the rows spanned.
+   */
+  const seatBands = (key: string, slots: (string | null)[], x0: number, edge: number, grow: "down" | "up") => {
+    const bands = bandsFor(key, slots.length);
+    const seats: Seat[] = [];
+    let cursor = edge; // next free row in the growth direction
+    let i = 0;
+    for (const band of bands) {
+      const top = grow === "down" ? cursor : cursor - band.h + 1;
+      cursor = grow === "down" ? cursor + band.h : cursor - band.h;
+      for (const b of band.seats) {
+        if (i >= slots.length) break;
+        const seat: Seat = { x: x0 + b.x, y: top + b.y, face: b.face };
+        seats.push(seat);
+        for (const t of deskTiles(seat)) deskSet.add(cellKey(t.x, t.y));
+        monitors.push({ ...monitorTile(seat), face: seat.face });
+        const id = slots[i];
+        if (id) seatOf.set(id, seat);
+        i++;
+      }
+    }
+    const rows = bands.reduce((n, b) => n + b.h, 0);
+    return { seats, rows, bands: bands.map((b) => b.name) };
   };
 
   // ---- rooms ----------------------------------------------------------------------
-  const rooms: RoomPlan[] = book.roomOrder.map((key, i) => {
+  const rooms: (RoomPlan & { bands: string[] })[] = book.roomOrder.map((key, i) => {
     const slots = book.slots.get(key) ?? [];
-    const rows = Math.max(1, Math.ceil(slots.length / ROOM_COLS));
     const x0 = 1 + i * (ROOM_W + 1);
     const x1 = x0 + ROOM_W - 1;
     const y1 = -2;
-    const y0 = -2 - SLOT_H * rows; // one row of headroom above the top desks
-    const seats: Seat[] = [];
-    for (let s = 0; s < rows * ROOM_COLS; s++) {
-      const r = Math.floor(s / ROOM_COLS);
-      const c = s % ROOM_COLS;
-      const seat = { x: x0 + 1 + c * SLOT_W + 1, y: -4 - r * SLOT_H };
-      if (s < slots.length) {
-        seats.push(seat);
-        desks.push({ x: seat.x - 1, y: seat.y + 1 });
-        seatAt(slots, s, seat);
-      }
-    }
-    return { key, label: key, x0, y0, x1, y1, door: { x: x0 + 5, y: -1 }, slots, seats };
+    const { seats, rows, bands } = seatBands(key, slots, x0, y1, "up");
+    const y0 = y1 - rows; // one row of headroom above the top band
+    return { key, label: key, x0, y0, x1, y1, door: { x: x0 + 5, y: -1 }, slots, seats, bands };
   });
 
   // ---- lobby + corridor -------------------------------------------------------------
   const lobbySlots = book.slots.get(LOBBY_KEY) ?? [];
-  const lobbyRows = Math.ceil(lobbySlots.length / LOBBY_COLS);
   const width = Math.max(rooms.length * (ROOM_W + 1) - 1, LOBBY_MIN_W);
-  const lobbyBottom = 4 + SLOT_H * lobbyRows;
-  const lobbySeats: Seat[] = [];
-  lobbySlots.forEach((_, s) => {
-    const r = Math.floor(s / LOBBY_COLS);
-    const c = s % LOBBY_COLS;
-    const seat = { x: 2 + c * SLOT_W + 1, y: 4 + r * SLOT_H };
-    lobbySeats.push(seat);
-    desks.push({ x: seat.x - 1, y: seat.y + 1 });
-    seatAt(lobbySlots, s, seat);
-  });
+  const lobbyLaid = lobbySlots.length ? seatBands(LOBBY_KEY, lobbySlots, LOBBY_X, LOBBY_TOP, "down") : { seats: [], rows: 0, bands: [] };
+  const lobbySeats = lobbyLaid.seats;
+  const lobbyBottom = LOBBY_TOP + lobbyLaid.rows; // a free row below the last band for the exit
   const lobby: RoomPlan = {
     key: LOBBY_KEY,
     label: "lobby",
@@ -159,10 +173,16 @@ export function buildFloorPlan(book: SeatBook): FloorPlan {
 
   const minY = Math.min(-1, ...rooms.map((r) => r.y0 - 1));
   const spawn = { x: exit.x, y: lobbyBottom };
-  const geometryKey = JSON.stringify([
-    rooms.map((r) => [r.key, r.seats.length]),
-    lobbySeats.length,
-  ]);
+  const geometryKey = JSON.stringify([rooms.map((r) => [r.key, r.seats.length, r.bands]), lobbySeats.length, lobbyLaid.bands]);
+
+  // Horizontal runs of desk tiles become one long desk: left end, middles, right end.
+  const desks: DeskTile[] = [];
+  for (const k of deskSet) {
+    const [x, y] = k.split(",").map(Number);
+    const l = deskSet.has(cellKey(x - 1, y));
+    const r = deskSet.has(cellKey(x + 1, y));
+    desks.push({ x, y, piece: l && r ? "mid" : l ? "right" : r ? "left" : "single" });
+  }
 
   return {
     cells,
@@ -170,6 +190,7 @@ export function buildFloorPlan(book: SeatBook): FloorPlan {
     lobby,
     decor,
     desks,
+    monitors,
     exit,
     spawn,
     bounds: { minX: 0, minY, maxX: width + 1, maxY: lobbyBottom + 1 },

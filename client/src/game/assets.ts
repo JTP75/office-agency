@@ -70,8 +70,9 @@ export const CITY = {
     [311, 335],
     [263, 287],
   ],
-  cars: [275, 276, 299, 300],
-  // Characters: 4 people × 3 walk frames.
+  bush: 358,
+  // Characters: 4 people × 3 walk frames, front view only (back and side views are
+  // derived from these in personFrames()).
   people: [
     [283, 284, 285],
     [307, 308, 309],
@@ -81,9 +82,11 @@ export const CITY = {
 } as const;
 
 export const INDOOR = {
-  desk: [112, 113, 114],
-  chairBack: 55,
-  monitor: 129,
+  desk: { left: 112, mid: 113, right: 114, single: 115 },
+  /** Chairs by the way the sitter faces. */
+  chair: { down: 54, up: 55, right: 56, left: 57 },
+  monitorFront: 129,
+  monitorBack: 130,
   plants: [16, 17],
   shelves: [478, 479],
   counter: [324, 325, 326],
@@ -96,6 +99,99 @@ export const INDOOR = {
 // ---- painted textures (floors, walls) ------------------------------------------------
 
 export const PAINT: Record<string, Texture> = {};
+
+// ---- people facing four ways -------------------------------------------------------------
+
+export type Facing = "down" | "up" | "left" | "right";
+
+const facingCache = new Map<string, Record<"down" | "up" | "side", Texture[]>>();
+
+/**
+ * One person's frames for each facing. The sheet only has front views, so:
+ *   up   = the front frames with the face and collar painted over in hair and shirt
+ *   side = a narrow profile built from the person's own palette (draw flipped for left)
+ */
+export function personFrames(look: number) {
+  const hit = facingCache.get(String(look));
+  if (hit) return hit;
+  const ids = CITY.people[look];
+  const img = cityBase.source.resource as CanvasImageSource;
+  const read = (id: number) => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 8;
+    const g = c.getContext("2d", { willReadFrequently: true })!;
+    g.drawImage(img, (id % 24) * 9, Math.floor(id / 24) * 9, 8, 8, 0, 0, 8, 8);
+    return g.getImageData(0, 0, 8, 8);
+  };
+  const key = (d: ImageData, x: number, y: number) => {
+    const i = (y * 8 + x) * 4;
+    return d.data[i + 3] ? `${d.data[i]},${d.data[i + 1]},${d.data[i + 2]}` : "";
+  };
+  const front = read(ids[0]);
+  const hair = key(front, 3, 0);
+  const collar = "255,241,232";
+  let skin = "";
+  for (let y = 1; y < 3 && !skin; y++) for (let x = 2; x < 6 && !skin; x++) if (key(front, x, y) && key(front, x, y) !== hair) skin = key(front, x, y);
+  const counts = new Map<string, number>();
+  for (let y = 2; y < 6; y++)
+    for (let x = 0; x < 8; x++) {
+      const k = key(front, x, y);
+      if (k && k !== hair && k !== skin && k !== collar) counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+  const shirt = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? hair;
+  const pants = key(front, 2, 6) || shirt;
+  const shoes = key(front, 2, 7) || hair;
+
+  const toTexture = (d: ImageData) => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 8;
+    c.getContext("2d")!.putImageData(d, 0, 0);
+    return Texture.from(c);
+  };
+  const recolor = (d: ImageData, map: (k: string, x: number, y: number) => string | null) => {
+    const out = new ImageData(new Uint8ClampedArray(d.data), 8, 8);
+    for (let y = 0; y < 8; y++)
+      for (let x = 0; x < 8; x++) {
+        const k = map(key(d, x, y), x, y);
+        if (k === null) continue;
+        const i = (y * 8 + x) * 4;
+        if (k === "") out.data[i + 3] = 0;
+        else {
+          const [r, g, b] = k.split(",").map(Number);
+          out.data.set([r, g, b, 255], i);
+        }
+      }
+    return out;
+  };
+
+  const up = ids.map((id) =>
+    toTexture(recolor(read(id), (k, _x, y) => (y < 3 && k === skin ? hair : k === collar ? shirt : null))),
+  );
+
+  // Side profile, facing right. Legs differ per frame so it still reads as walking.
+  const legs = [
+    ["..P.P...", "..F.F..."],
+    ["...PP...", "...FF..."],
+    ["..PP....", "..FF...."],
+  ];
+  const side = legs.map(([l6, l7]) => {
+    const rows = ["...HH...", "..HHS...", "..HSS...", "..CCC...", "..CCCS..", "..PPP...", l6, l7];
+    const pal: Record<string, string> = { H: hair, S: skin, C: shirt, P: pants, F: shoes };
+    const d = new ImageData(8, 8);
+    rows.forEach((row, y) =>
+      [...row].forEach((ch, x) => {
+        if (ch === "." || !pal[ch]) return;
+        const [r, g, b] = pal[ch].split(",").map(Number);
+        d.data.set([r, g, b, 255], (y * 8 + x) * 4);
+      }),
+    );
+    return toTexture(d);
+  });
+
+  const frames = { down: ids.map((id) => city(id)), up, side };
+  facingCache.set(String(look), frames);
+  return frames;
+}
 
 function canvasTexture(draw: (g: CanvasRenderingContext2D) => void, w = 16, h = 16) {
   const c = document.createElement("canvas");
@@ -145,6 +241,38 @@ function paintTextures() {
     g.fillStyle = "#8f6a45";
     g.fillRect(0, 13, 16, 3);
   });
+  // Grassy dirt road (8 px like the pico-8 tiles, drawn at 2×): two wheel ruts with
+  // grass between them, and ragged grass edges.
+  const pico = (draw: (g: CanvasRenderingContext2D) => void) => canvasTexture(draw, 8, 8);
+  const dirt = (g: CanvasRenderingContext2D, seed: number) => {
+    g.fillStyle = "#ab5236";
+    g.fillRect(0, 0, 8, 8);
+    g.fillStyle = "#5f574f";
+    for (const [x, y] of [[(seed * 3) % 8, (seed * 5) % 8], [(seed * 7 + 3) % 8, (seed + 4) % 8]]) g.fillRect(x, y, 1, 1);
+  };
+  const tufts = (g: CanvasRenderingContext2D, rows: number[], seed: number) => {
+    g.fillStyle = "#008751";
+    for (const y of rows) for (let x = 0; x < 8; x++) if ((x * 7 + y * 3 + seed) % 5 !== 0) g.fillRect(x, y, 1, 1);
+    g.fillStyle = "#00e436";
+    g.fillRect((seed * 3) % 8, rows[0], 1, 1);
+  };
+  PAINT.roadTop = pico((g) => {
+    dirt(g, 1);
+    tufts(g, [0, 1], 1);
+    g.fillStyle = "#008751";
+    for (let x = 0; x < 8; x += 3) g.fillRect(x, 2, 1, 1);
+  });
+  PAINT.road = pico((g) => {
+    dirt(g, 2);
+    tufts(g, [3, 4], 2); // the grass strip between the ruts
+  });
+  PAINT.roadBottom = pico((g) => {
+    dirt(g, 3);
+    tufts(g, [6, 7], 3);
+    g.fillStyle = "#008751";
+    for (let x = 1; x < 8; x += 3) g.fillRect(x, 5, 1, 1);
+  });
+
   // Entrance mat.
   PAINT.mat = canvasTexture((g) => {
     g.fillStyle = "#6b4a2e";

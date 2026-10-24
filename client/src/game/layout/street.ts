@@ -2,11 +2,9 @@
 // Pure data, no rendering. Coordinates are tiles (one pico-8 tile drawn at 2× = 16px).
 //
 //   rows 0-1   grass + trees
-//   rows 2-8   sidewalk; buildings occupy rows 3-7, doors on row 7
-//   row  9     curb
-//   rows 10-12 road
-//   row  13    curb
-//   row  14    sidewalk (player spawn)
+//   rows 2-9   grass; buildings occupy rows 3-7, doors on row 7; bushes between them
+//   rows 10-12 grassy dirt road
+//   rows 13-14 grass (player spawn on 14); bushes along the road
 //   rows 15-17 grass + trees
 
 export const BUILDING_W = 6;
@@ -27,7 +25,8 @@ export interface StreetPlan {
   height: number;
   lots: Lot[];
   trees: { x: number; y: number; v: number }[]; // y = top tile; trunk at y+1
-  cars: { x: number; y: number; v: number }[];
+  /** One-tile bushes (solid). */
+  bushes: { x: number; y: number }[];
   spawn: { x: number; y: number };
 }
 
@@ -43,10 +42,14 @@ export function buildStreet(projects: string[]): StreetPlan {
   for (let x = 1; x < width - 1; x += 3) trees.push({ x, y: 0, v: (x * 7) % 3 === 0 ? 1 : 0 });
   for (let x = 2; x < width - 1; x += 4) trees.push({ x, y: 16, v: (x * 5) % 4 === 0 ? 2 : 0 });
 
-  const cars: StreetPlan["cars"] = [
-    { x: Math.floor(width * 0.7), y: 10, v: 0 },
-    { x: Math.floor(width * 0.25), y: 12, v: 2 },
-  ];
+  const spawn = { x: Math.floor(width / 2), y: 14 };
+  // Bushes in the gaps between buildings, at both ends of the street, and along the
+  // road's south side, never on a door's column or the spawn.
+  const doors = new Set(lots.map((l) => l.door.x));
+  const bushes: StreetPlan["bushes"] = [];
+  for (const l of lots) bushes.push({ x: l.x + BUILDING_W + 1, y: 7 }, { x: l.x + BUILDING_W, y: 9 });
+  bushes.push({ x: 1, y: 6 }, { x: 1, y: 8 }, { x: width - 2, y: 6 }, { x: width - 2, y: 8 });
+  for (let x = 3; x < width - 2; x += 5) if (Math.abs(x - spawn.x) > 2 && !doors.has(x)) bushes.push({ x, y: 13 });
 
-  return { width, height: STREET_H, lots, trees, cars, spawn: { x: Math.floor(width / 2), y: 14 } };
+  return { width, height: STREET_H, lots, trees, bushes, spawn };
 }
