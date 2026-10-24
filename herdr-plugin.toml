@@ -5,17 +5,23 @@ min_herdr_version = "0.9.3"
 description = "Your agent fleet as a 2D office you can walk around"
 platforms = ["linux", "macos"]
 
-# The server lives in a pane so its lifetime and logs are visible.
-# Closing the pane stops the office.
-[[panes]]
-id = "office"
-title = "Office"
-placement = "tab"
-command = ["node", "server/index.mjs"]
-
-# Opens the browser on a running office, or starts the server pane first.
+# Opens the office in the browser, starting the background server if needed.
+# The server adds nothing to the layout and exits when herdr stops.
 [[actions]]
 id = "open"
 title = "Open office"
 contexts = ["workspace"]
 command = ["node", "scripts/open.mjs"]
+
+[[actions]]
+id = "stop"
+title = "Stop office"
+contexts = ["workspace"]
+command = ["node", "scripts/stop.mjs"]
+
+# On-demand view of the server log.
+[[panes]]
+id = "logs"
+title = "Office logs"
+placement = "split"
+command = ["node", "scripts/logs.mjs"]

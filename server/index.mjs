@@ -1,5 +1,6 @@
 // Office server: serves the client and relays agent state over SSE.
 // Zero dependencies on purpose: the plugin runs from a raw checkout.
+// In herdr it runs as a background daemon started by scripts/open.mjs.
 //
 //   node server/index.mjs                  # real agents from herdr
 //   node server/index.mjs --source fixture # fake agents, no herdr needed
@@ -9,21 +10,29 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
 import { createHerdrSource } from "./sources/herdr.mjs";
 import { createFixtureSource } from "./sources/fixture.mjs";
+import { SOCKET_PATH } from "./herdr.mjs";
+import { openBrowser } from "./browser.mjs";
+import { readOffice, pickPort, writeOffice, onShutdown, shutdown } from "./lifecycle.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // A built client (client/dist) wins over the raw source directory.
 const CLIENT_DIR = [path.join(ROOT, "client", "dist"), path.join(ROOT, "client")].find((d) => fs.existsSync(d));
-const STATE_DIR = process.env.HERDR_PLUGIN_STATE_DIR ?? path.join(ROOT, ".state");
 const HOST = "127.0.0.1";
-const PORT = Number(process.env.OFFICE_PORT ?? 4567);
 const TOKEN = process.env.OFFICE_TOKEN ?? crypto.randomBytes(16).toString("hex");
 
 const args = process.argv.slice(2);
 const sourceName = args.includes("--source") ? args[args.indexOf("--source") + 1] : process.env.HERDR_ENV ? "herdr" : "fixture";
-const source = sourceName === "herdr" ? createHerdrSource() : createFixtureSource();
+
+const running = readOffice();
+if (running) {
+  console.log(`office already running (pid ${running.pid}) at ${running.url}`);
+  process.exit(0);
+}
+
+const source = sourceName === "herdr" ? createHerdrSource({ onDead: () => shutdown("herdr went away") }) : createFixtureSource();
+onShutdown(() => source.close());
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -86,24 +95,10 @@ const server = http.createServer((req, res) => {
   serveStatic(url, res);
 });
 
-server.listen(PORT, HOST, () => {
-  const url = `http://${HOST}:${PORT}/?t=${TOKEN}`;
-  fs.mkdirSync(STATE_DIR, { recursive: true });
-  fs.writeFileSync(path.join(STATE_DIR, "office.json"), JSON.stringify({ url, token: TOKEN, pid: process.pid }));
+const port = await pickPort(HOST);
+server.listen(port, HOST, () => {
+  const url = `http://${HOST}:${port}/?t=${TOKEN}`;
+  writeOffice({ url, token: TOKEN, pid: process.pid, port, source: sourceName, socket: sourceName === "herdr" ? SOCKET_PATH : null });
   console.log(`office (${sourceName}) at ${url}`);
-  if (!args.includes("--no-open"))
-    spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { stdio: "ignore", detached: true })
-      .on("error", () => {})
-      .unref();
+  if (!args.includes("--no-open")) openBrowser(url);
 });
-
-function shutdown() {
-  source.close();
-  try {
-    fs.rmSync(path.join(STATE_DIR, "office.json"));
-  } catch {}
-  process.exit(0);
-}
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-process.on("SIGHUP", shutdown);

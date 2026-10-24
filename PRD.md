@@ -62,14 +62,14 @@ Additive fields are fine without a review (the client ignores unknown keys). Ren
 
 Backend builds the skeleton alone, then hands `client/` over. It's done when every box below is ticked on one laptop, from a fresh clone.
 
-- [ ] `herdr plugin link .` registers the plugin with no warnings
-- [ ] Running the **Open office** action starts the server pane and opens the browser
+- [x] `herdr plugin link .` registers the plugin with no warnings
+- [x] Running the **Open office** action starts the server in the background and opens the browser, adding nothing to the herdr layout
 - [ ] The player walks the map with WASD / arrow keys and stops at walls and desks
-- [ ] The HUD shows the real agent count and colored status dots, and they change when an agent changes state
-- [ ] `node server/index.mjs --source fixture` runs the same page with no herdr installed
-- [ ] Closing the server pane stops the server and removes `office.json`
+- [x] The HUD shows the real agent count and colored status dots, and they change when an agent changes state
+- [x] `node server/index.mjs --source fixture` runs the same page with no herdr installed
+- [x] Stopping herdr (or the **Stop office** action) stops the server and removes `office.json`
 
-Built and pushed: the plugin manifest, a zero-dependency Node server with token gate and SSE, `HerdrSource` (polls `herdr agent list` every 1 s, resolves each agent's project and worktree from git) and `FixtureSource` (13 agents across 2 projects and 5 worktrees, random status every 3 s), the open action, and a plain-canvas client with a tile map, movement and collision. Fixture and herdr modes verified from the command line; the herdr plugin path (link → action → pane) is not yet verified.
+Built and pushed: the plugin manifest, a zero-dependency Node server with token gate and SSE, `HerdrSource` (push-fed from `events.subscribe`, resolves each agent's project and worktree from git) and `FixtureSource` (13 agents across 2 projects and 5 worktrees, random status every 3 s), the open action, and a plain-canvas client with a tile map, movement and collision. The server runs as a background daemon started by the open action; it is push-fed from herdr's event stream and exits when herdr stops. Plugin path (link → open → stop) verified against a throwaway herdr session.
 
 The client is deliberately throwaway: no framework, no build step. Frontend picks the engine and tooling in phase 2; the only requirement is that the server can serve the built output from `client/` (or `client/dist/`).
 
