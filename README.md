@@ -7,7 +7,7 @@ Early hackathon build. See [`PRD.md`](PRD.md) for scope and [`FRONTEND_HANDOFF.m
 ## Requirements
 
 - herdr 0.9.3 or newer
-- Node 20 or newer on the `PATH` herdr runs with
+- Node 20 or newer and npm on the `PATH` herdr runs with (install builds the client)
 - macOS or Linux
 
 ## Install
@@ -50,10 +50,11 @@ herdr plugin uninstall office-agency
 
 ```bash
 git clone git@github.com:JTP75/office-agency.git && cd office-agency
+npm --prefix client ci && npm --prefix client run build   # `plugin link` doesn't build
 herdr plugin link .                         # register this checkout
 herdr plugin action invoke office-agency.open
 # after server changes:
 herdr plugin action invoke office-agency.stop && herdr plugin action invoke office-agency.open
 ```
 
-Without herdr, `node server/index.mjs --source fixture` serves the same page with fake agents.
+Without herdr, `node server/index.mjs --source fixture` serves the same page with fake agents (`--scenario empty|crowded|churn` for edge cases).

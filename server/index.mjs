@@ -4,6 +4,8 @@
 //
 //   node server/index.mjs                  # real agents from herdr
 //   node server/index.mjs --source fixture # fake agents, no herdr needed
+//     --scenario default|empty|crowded|churn  (fixture only)
+//     --port-fallback                         try the next ports if busy (the daemon uses this)
 
 import http from "node:http";
 import fs from "node:fs";
@@ -15,15 +17,25 @@ import { createFixtureSource } from "./sources/fixture.mjs";
 import { SOCKET_PATH } from "./herdr.mjs";
 import { openBrowser } from "./browser.mjs";
 import { readOffice, pickPort, writeOffice, onShutdown, shutdown } from "./lifecycle.mjs";
+import { CommandError, checkKeys, checkLines, checkPrompt } from "./sources/commands.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-// A built client (client/dist) wins over the raw source directory.
-const CLIENT_DIR = [path.join(ROOT, "client", "dist"), path.join(ROOT, "client")].find((d) => fs.existsSync(d));
+// The client is served from its Vite build. Checked per request, so building
+// while the server runs just works.
+const CLIENT_DIR = path.join(ROOT, "client", "dist");
+const NOT_BUILT = `<!doctype html><meta charset="utf-8"><title>Office Agency</title>
+<body style="font:15px system-ui;max-width:40em;margin:3em auto;padding:0 1em">
+<h1>The office client isn't built yet</h1>
+<p>Run this in the plugin directory, then reload:</p>
+<pre>npm --prefix client ci &amp;&amp; npm --prefix client run build</pre>
+<p>Working on the client? Use the Vite dev server instead (see FRONTEND_HANDOFF.md).</p>`;
 const HOST = "127.0.0.1";
 const TOKEN = process.env.OFFICE_TOKEN ?? crypto.randomBytes(16).toString("hex");
 
 const args = process.argv.slice(2);
-const sourceName = args.includes("--source") ? args[args.indexOf("--source") + 1] : process.env.HERDR_ENV ? "herdr" : "fixture";
+const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
+const sourceName = flag("--source") ?? (process.env.HERDR_ENV ? "herdr" : "fixture");
+const scenario = flag("--scenario") ?? process.env.OFFICE_SCENARIO ?? "default";
 
 const running = readOffice();
 if (running) {
@@ -31,7 +43,8 @@ if (running) {
   process.exit(0);
 }
 
-const source = sourceName === "herdr" ? createHerdrSource({ onDead: () => shutdown("herdr went away") }) : createFixtureSource();
+const source =
+  sourceName === "herdr" ? createHerdrSource({ onDead: () => shutdown("herdr went away") }) : createFixtureSource({ scenario });
 onShutdown(() => source.close());
 
 const MIME = {
@@ -58,6 +71,7 @@ function authorized(url) {
 }
 
 function serveStatic(url, res) {
+  if (!fs.existsSync(CLIENT_DIR)) return res.writeHead(503, { "content-type": "text/html; charset=utf-8" }).end(NOT_BUILT);
   const rel = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
   const file = path.resolve(CLIENT_DIR, rel);
   if (!file.startsWith(CLIENT_DIR + path.sep)) return notFound(res);
@@ -70,6 +84,52 @@ function serveStatic(url, res) {
 
 function notFound(res) {
   res.writeHead(404).end("not found");
+}
+
+function json(res, status, body) {
+  res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      raw += chunk;
+      if (raw.length > 64 * 1024) {
+        reject(new CommandError(413, "too_large", "body over 64 KB"));
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      try {
+        resolve(raw ? JSON.parse(raw) : {});
+      } catch {
+        reject(new CommandError(400, "bad_request", "body is not JSON"));
+      }
+    });
+  });
+}
+
+// /api/agents/:id/<verb>. Only these four verbs reach herdr.
+const COMMANDS = {
+  "POST prompt": async (id, req) => source.prompt(id, checkPrompt(await readBody(req))),
+  "GET read": async (id, req, url) => ({ lines: await source.read(id, checkLines(url.searchParams.get("lines"))) }),
+  "POST keys": async (id, req) => source.keys(id, checkKeys(await readBody(req))),
+  "POST focus": async (id) => source.focus(id),
+};
+
+async function command(req, res, url) {
+  const m = url.pathname.match(/^\/api\/agents\/([^/]+)\/([a-z]+)$/);
+  const handler = m && COMMANDS[`${req.method} ${m[2]}`];
+  if (!handler) return json(res, 404, { error: "not_found", message: `no route ${req.method} ${url.pathname}` });
+  try {
+    const result = await handler(decodeURIComponent(m[1]), req, url);
+    json(res, 200, { ok: true, ...result });
+  } catch (err) {
+    if (!(err instanceof CommandError)) console.error(err);
+    json(res, err.status ?? 500, { error: err.code ?? "internal", message: err.message });
+  }
 }
 
 const server = http.createServer((req, res) => {
@@ -89,13 +149,17 @@ const server = http.createServer((req, res) => {
       req.on("close", () => clients.delete(res));
       return;
     }
+    // Lets the client tell "server down" (network error) from "server restarted
+    // with a new token" (401), which EventSource can't distinguish.
+    if (url.pathname === "/api/ping") return json(res, 200, { ok: true, source: sourceName });
+    if (url.pathname.startsWith("/api/agents/")) return command(req, res, url);
     return notFound(res);
   }
 
   serveStatic(url, res);
 });
 
-const port = await pickPort(HOST);
+const port = await pickPort(HOST, args.includes("--port-fallback"));
 server.listen(port, HOST, () => {
   const url = `http://${HOST}:${port}/?t=${TOKEN}`;
   writeOffice({ url, token: TOKEN, pid: process.pid, port, source: sourceName, socket: sourceName === "herdr" ? SOCKET_PATH : null });

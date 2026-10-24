@@ -9,8 +9,10 @@
 //     stale id rejects the whole request, so it's rebuilt whenever the set of
 //     agent panes changes.
 
+import path from "node:path";
 import { request, subscribe } from "../herdr.mjs";
 import { placeOf } from "./git.mjs";
+import { CommandError } from "./commands.mjs";
 
 const LIFECYCLE = ["pane.created", "pane.closed", "pane.updated", "pane.moved", "pane.agent_detected"];
 const SAFETY_POLL_MS = 5000;
@@ -26,6 +28,7 @@ export function createHerdrSource({ onDead }) {
   let lifecycleSub = null;
   let statusSub = null;
   let closed = false;
+  let known = new Set();
 
   let refreshing = false;
   let again = false;
@@ -59,7 +62,7 @@ export function createHerdrSource({ onDead }) {
     const ids = raw.map((a) => a.pane_id).sort();
     if (ids.join(",") !== watchedIds) watchStatuses(ids);
 
-    const agents = await Promise.all(
+    const placed = await Promise.all(
       raw.map(async (a) => ({
         id: a.pane_id,
         kind: a.agent,
@@ -70,6 +73,8 @@ export function createHerdrSource({ onDead }) {
         title: a.terminal_title_stripped ?? "",
       })),
     );
+    const agents = uniqueProjects(placed);
+    known = new Set(agents.map((a) => a.id));
     const snapshot = { type: "snapshot", source: "herdr", agents };
     const json = JSON.stringify(snapshot);
     if (json === last) return;
@@ -122,8 +127,41 @@ export function createHerdrSource({ onDead }) {
   schedule();
   const timer = setInterval(schedule, SAFETY_POLL_MS);
 
+  // Commands. Only agents in the current snapshot can be targeted, so the
+  // browser can never reach a plain shell pane.
+  function target(id) {
+    if (!known.has(id)) throw new CommandError(404, "agent_not_found", `agent ${id} not found`);
+    return id;
+  }
+
+  async function call(method, params) {
+    try {
+      return await request(method, params);
+    } catch (err) {
+      if (err.code === "agent_blocked" || err.code === "agent_not_ready") throw new CommandError(409, err.code, err.message);
+      if (err.code === "agent_not_found") throw new CommandError(404, err.code, err.message);
+      throw new CommandError(502, err.code ?? "herdr_error", err.message);
+    }
+  }
+
   return {
     subscribe: (cb) => listeners.add(cb),
+    has: (id) => known.has(id),
+    async prompt(id, text) {
+      await call("agent.prompt", { target: target(id), text });
+      schedule();
+    },
+    async read(id, lines) {
+      const { read } = await call("agent.read", { target: target(id), source: "recent_unwrapped", format: "text", lines });
+      return read.text.replace(/\n+$/, "").split("\n");
+    },
+    async keys(id, keys) {
+      await call("agent.send_keys", { target: target(id), keys });
+      schedule();
+    },
+    async focus(id) {
+      await call("agent.focus", { target: target(id) });
+    },
     close: () => {
       closed = true;
       clearInterval(timer);
@@ -132,4 +170,17 @@ export function createHerdrSource({ onDead }) {
       statusSub?.close();
     },
   };
+}
+
+// Two different directories with the same name would otherwise merge into one
+// building. Disambiguate with the parent directory's name: "api (work)".
+function uniqueProjects(agents) {
+  const roots = new Map();
+  for (const a of agents) {
+    if (!roots.has(a.project)) roots.set(a.project, new Set());
+    roots.get(a.project).add(a.root);
+  }
+  return agents.map(({ root, ...a }) =>
+    roots.get(a.project).size > 1 ? { ...a, project: `${a.project} (${path.basename(path.dirname(root))})` } : a,
+  );
 }
