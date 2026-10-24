@@ -1,6 +1,7 @@
 // Right-side drawer with one agent's live terminal, plus the "press E" hint.
 // Agent text is rendered by React as text (escaped), never as HTML.
 import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 import { agentPath, post } from "../net/api";
 import { closeDrawer, useOffice } from "../state/store";
 import { TerminalView } from "../term/TerminalView";
@@ -37,8 +38,15 @@ export function AgentDrawer() {
       .then(() => setNote("Focused in herdr"))
       .catch((e: Error) => setNote(e.message));
 
+  // The drawer is mounted on E/click before the effect below runs, and while it
+  // was closed `--drawer-w` is `0px`. Setting the width here as well means the
+  // terminal is laid out (and fitted) at its real size on the first frame
+  // instead of opening at xterm's default and resizing the agent's pane a tick
+  // later — that mid-open resize is what leaves the TUI reflowing/ghosting.
+  const width = { "--drawer-w": `${drawerWidth(true)}px` } as CSSProperties;
+
   return (
-    <aside className="drawer" aria-label={`Terminal for ${agent?.title || id}`}>
+    <aside className="drawer" style={width} aria-label={`Terminal for ${agent?.title || id}`}>
       <header className="action-strip">
         <div className="who">
           <div className="row">

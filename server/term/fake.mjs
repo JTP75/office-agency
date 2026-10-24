@@ -20,12 +20,14 @@ export class FakeTerm {
     Object.assign(this, { cols, rows, agent, history, prompt, keys, onFrame, onClosed });
     this.buffer = "";
     this.closed = false;
+    this.offsetBack = 0; // lines scrolled back from the end of the transcript
     setImmediate(() => this.render()); // after the hub has stored our handle
   }
 
   // ---- terminal contract ----------------------------------------------------------
 
   input({ text, bytes }) {
+    this.offsetBack = 0; // typing jumps back to the live prompt
     const s = text ?? Buffer.from(bytes ?? "", "base64").toString("utf8");
     for (let i = 0; i < s.length; i++) {
       const ch = s[i];
@@ -47,6 +49,12 @@ export class FakeTerm {
   resize(cols, rows) {
     this.cols = cols;
     this.rows = rows;
+    this.render();
+  }
+
+  /** A wheel notch: scroll the transcript instead of stepping through history. */
+  scroll({ direction, lines }) {
+    this.offsetBack = Math.max(0, this.offsetBack + (direction === "up" ? lines : -lines));
     this.render();
   }
 
@@ -111,13 +119,16 @@ export class FakeTerm {
           ? [`${ESC}[33m✻ Working…${ESC}[0m`]
           : [];
     const bodyRows = Math.max(1, rows - 5 - dialog.length);
-    const transcript = this.history()
-      .flatMap((line) => wrap(line, cols))
-      .slice(-bodyRows);
+    const all = this.history().flatMap((line) => wrap(line, cols));
+    // Clamp the scroll: one line is always kept in view, like a pager.
+    this.offsetBack = Math.min(this.offsetBack, Math.max(0, all.length - 1));
+    const end = all.length - this.offsetBack;
+    const transcript = all.slice(Math.max(0, end - bodyRows), end);
     while (transcript.length < bodyRows) transcript.unshift("");
 
     const promptLine = `${ESC}[1m❯${ESC}[0m ${this.buffer}`;
-    const footer = `${ESC}[2m${fit("fixture terminal · Enter sends · Ctrl+] leaves")}${ESC}[0m`;
+    const footerText = this.offsetBack ? `scrolled back ${this.offsetBack} lines · wheel down to return` : "fixture terminal · Enter sends · Ctrl+] leaves";
+    const footer = `${ESC}[2m${fit(footerText)}${ESC}[0m`;
 
     const lines = [header, `${ESC}[90m${rule}${ESC}[0m`, ...transcript.map(fit), ...dialog.map((d) => fit(d)), `${ESC}[90m${rule}${ESC}[0m`, promptLine, footer];
     // Status sits at the end of the header line.

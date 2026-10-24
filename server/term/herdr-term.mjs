@@ -2,7 +2,8 @@
 //
 // A session is one `herdr terminal session control <pane> --takeover` process:
 // it prints NDJSON `terminal.frame` / `terminal.closed` records and reads
-// `terminal.input` / `terminal.resize` / `terminal.release` commands on stdin.
+// `terminal.input` / `terminal.resize` / `terminal.scroll` / `terminal.mouse` /
+// `terminal.release` commands on stdin.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -12,6 +13,14 @@ import { SOCKET_PATH } from "../herdr.mjs";
 
 const HERDR = process.env.HERDR_BIN_PATH ?? "herdr";
 const RELEASE_GRACE_MS = 1000;
+
+/** The control-stdin command for one wheel notch (`direction` up/down, cell zero-based). */
+export function scrollCommand({ direction, lines, column, row }) {
+  const cmd = { type: "terminal.scroll", direction, lines };
+  if (Number.isInteger(column)) cmd.column = column;
+  if (Number.isInteger(row)) cmd.row = row;
+  return cmd;
+}
 
 export function openHerdrTerminal(paneId, { cols, rows }, { onFrame, onClosed }) {
   const proc = spawn(HERDR, ["terminal", "session", "control", paneId, "--takeover", "--cols", String(cols), "--rows", String(rows)], {
@@ -63,6 +72,9 @@ export function openHerdrTerminal(paneId, { cols, rows }, { onFrame, onClosed })
   return {
     input: ({ text, bytes }) => send(text != null ? { type: "terminal.input", text } : { type: "terminal.input", bytes }),
     resize: (c, r) => send({ type: "terminal.resize", cols: c, rows: r }),
+    // herdr turns this into a mouse-wheel event for apps with mouse reporting and
+    // drops it for apps without one (so it never degrades into arrow keys).
+    scroll: (data) => send(scrollCommand(data)),
     release() {
       send({ type: "terminal.release" });
       done = true; // the hub asked for this; no closed event back to it

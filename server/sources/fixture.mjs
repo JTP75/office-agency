@@ -190,6 +190,7 @@ export function createFixtureSource({ scenario = "default" } = {}) {
       return {
         input: (data) => term.input(data),
         resize: (c, r) => term.resize(c, r),
+        scroll: (data) => term.scroll(data),
         release: () => {
           term.release();
           if (terms.get(id) === term) terms.delete(id);

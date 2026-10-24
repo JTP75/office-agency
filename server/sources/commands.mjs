@@ -36,3 +36,22 @@ export function checkLines(raw) {
   if (!Number.isInteger(n) || n < 1 || n > MAX_READ_LINES) throw new CommandError(400, "bad_request", `lines must be 1-${MAX_READ_LINES}`);
   return n;
 }
+
+export const MAX_SCROLL_LINES = 50;
+
+/** A wheel notch for `POST term/scroll`: direction plus an optional cell. */
+export function checkTermScroll(body) {
+  const direction = body?.direction;
+  if (direction !== "up" && direction !== "down") throw new CommandError(400, "bad_request", 'direction must be "up" or "down"');
+  const lines = body?.lines == null ? 1 : Number(body.lines);
+  if (!Number.isInteger(lines) || lines < 1 || lines > MAX_SCROLL_LINES)
+    throw new CommandError(400, "bad_request", `lines must be 1-${MAX_SCROLL_LINES}`);
+  const out = { direction, lines };
+  for (const k of ["column", "row"]) {
+    if (body?.[k] == null) continue;
+    const n = Number(body[k]);
+    if (!Number.isInteger(n) || n < 0) throw new CommandError(400, "bad_request", `${k} must be a non-negative integer`);
+    out[k] = n;
+  }
+  return out;
+}
