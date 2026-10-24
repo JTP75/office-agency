@@ -52,6 +52,8 @@ The drawer's **Ghostty ↗** button opens the agent in a native terminal instead
 
 Supported: `ghostty` (default), `kitty`, `terminal` (macOS Terminal.app).
 
+The drawer draws its terminal with xterm.js's WebGL renderer (falling back to the DOM one), because only that renderer draws box-drawing and block characters (▀ ▄ █ ┃ ─ ╭╮╰╯) as exact vector cells. System monospace fonts inset them by a couple of pixels, which put a seam through every row of OpenCode's logo and left the prompt's rule floating mid-cell. Claude Code's `⏺ ⏵ ⎿ ⧉` markers are swapped for monospace-safe equivalents (● ▶ ↳ ▣) before each frame reaches xterm: no font in the stack has those codepoints, so the browser would otherwise fall back to a colour emoji or a maths font mid-row.
+
 ## Uninstall
 
 ```bash

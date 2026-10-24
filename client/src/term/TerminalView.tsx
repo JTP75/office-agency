@@ -2,11 +2,13 @@
 // keystrokes go out over POST. The terminal is sized to fit the drawer and the
 // agent's pane follows that size while we're connected.
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef, useState } from "react";
 import { agentPath, apiUrl, post } from "../net/api";
 import { store } from "../state/store";
+import { substituteGlyphs } from "./glyphs";
 import { typedInput } from "./termInput";
 import { cellAt, notchesFor, scrollCommand } from "./wheel";
 
@@ -77,6 +79,12 @@ export function TerminalView({ agentId }: { agentId: string }) {
       // instead of leaving a gap between rows.
       lineHeight: 1,
       letterSpacing: 0,
+      // Draw box-drawing and block elements (▀ ▄ █ ┃ ─ ╭╮╰╯) as vector cells
+      // rather than font glyphs. System monospace fonts inset ▀/█ by ~2.5px and
+      // draw a 6.5px half-block, so every row of OpenCode's block art got a seam
+      // and the prompt's ▀ rule floated as a thin detached line. Only the WebGL
+      // renderer (loaded below) implements these glyphs; the DOM renderer cannot.
+      customGlyphs: true,
       theme: THEME,
       cursorBlink: true,
       scrollback: 0, // the agent's TUI owns its own history; we mirror its screen
@@ -84,6 +92,19 @@ export function TerminalView({ agentId }: { agentId: string }) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(el);
+    // Frames arrive continuously, so the WebGL renderer is also the cheaper one.
+    // If it is unavailable (no WebGL, lost context) xterm keeps the DOM renderer.
+    let webgl: WebglAddon | undefined;
+    try {
+      webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        webgl?.dispose();
+        webgl = undefined;
+      });
+      term.loadAddon(webgl);
+    } catch {
+      webgl = undefined;
+    }
     fit.fit();
 
     const abort = new AbortController();
@@ -178,7 +199,7 @@ export function TerminalView({ agentId }: { agentId: string }) {
           }
           // Another viewer may have resized the shared session.
           if (ev.width !== term.cols || ev.height !== term.rows) term.resize(ev.width, ev.height);
-          term.write(b64ToBytes(ev.bytes));
+          term.write(substituteGlyphs(b64ToBytes(ev.bytes)));
         });
         end("connection closed");
       } catch (err) {
@@ -194,6 +215,7 @@ export function TerminalView({ agentId }: { agentId: string }) {
       typed.dispose();
       term.textarea?.removeEventListener("focus", onFocus);
       term.textarea?.removeEventListener("blur", onBlur);
+      webgl?.dispose();
       term.dispose();
       store.setState({ typing: false });
     };
