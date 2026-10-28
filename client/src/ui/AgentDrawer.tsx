@@ -26,7 +26,8 @@ export function AgentDrawer() {
 
   if (!drawer) return <NearHint />;
   const id = drawer.agentId;
-  const where = agent ? (agent.lobby ? `${agent.project} · lobby` : `${agent.project} @ ${agent.worktree ?? "(no branch)"}`) : "";
+  const room = agent ? (agent.lobby ? `${agent.project} · lobby` : `${agent.project} @ ${agent.worktree ?? "(no branch)"}`) : "";
+  const where = agent?.machine ? `${agent.machine} · ${room}` : room;
 
   const openNative = () =>
     post(agentPath(id, "open-native"))
@@ -35,7 +36,8 @@ export function AgentDrawer() {
 
   const focusInHerdr = () =>
     post(agentPath(id, "focus"))
-      .then(() => setNote("Focused in herdr"))
+      // A machine's herdr focuses the pane there; the herdr window shows it once that machine is selected.
+      .then((res: { machine?: string }) => setNote(res.machine ? `Focused on ${res.machine}; select it in herdr's sidebar` : "Focused in herdr"))
       .catch((e: Error) => setNote(e.message));
 
   // The drawer is mounted on E/click before the effect below runs, and while it

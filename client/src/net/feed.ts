@@ -1,5 +1,5 @@
 // Subscribes to the server's SSE snapshot stream (PROTOCOL.md) and feeds the store.
-import { parseAgent, type Agent } from "./protocol";
+import { parseAgent, parseMachine, type Agent, type Machine } from "./protocol";
 import { applySnapshot, store } from "../state/store";
 
 export function connectFeed() {
@@ -28,9 +28,10 @@ export function connectFeed() {
       return;
     }
     if (!msg || typeof msg !== "object") return;
-    const m = msg as { type?: unknown; source?: unknown; agents?: unknown };
+    const m = msg as { type?: unknown; source?: unknown; agents?: unknown; machines?: unknown };
     if (m.type !== "snapshot" || !Array.isArray(m.agents)) return;
     const agents = m.agents.map(parseAgent).filter((a): a is Agent => a !== null);
-    applySnapshot(typeof m.source === "string" ? m.source : "unknown", agents);
+    const machines = Array.isArray(m.machines) ? m.machines.map(parseMachine).filter((x): x is Machine => x !== null) : [];
+    applySnapshot(typeof m.source === "string" ? m.source : "unknown", agents, machines);
   };
 }

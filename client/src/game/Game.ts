@@ -1,7 +1,6 @@
 // Owns the Pixi application, the active scene, the player, the camera and scene transitions.
 import { Application, Container, Graphics } from "pixi.js";
-import type { Agent } from "../net/protocol";
-import { closeDrawer, store, type Location } from "../state/store";
+import { closeDrawer, districts, store, type Location, type OfficeState } from "../state/store";
 import { drawerWidth } from "../ui/drawerLayout";
 import { loadAssets } from "./assets";
 import { installInput } from "./input";
@@ -51,17 +50,17 @@ export class Game {
     store.setState({ renderer: this.app.renderer.name });
     this.app.stage.addChild(this.world, this.curtain);
     this.mount(this.street);
-    this.street.setAgents(store.getState().agents, store.getState().projects);
+    this.street.setAgents(store.getState().agents, districts(store.getState()));
     this.player.placeAtTile(this.street.plan.spawn.x, this.street.plan.spawn.y);
 
     store.subscribe((s, prev) => {
-      if (s.agents !== prev.agents || s.projects !== prev.projects) this.onAgents(s.agents, s.projects);
+      if (s.agents !== prev.agents || s.projects !== prev.projects || s.machines !== prev.machines) this.onAgents(s);
       if (s.travelRequest && s.travelRequest !== prev.travelRequest) {
         store.setState({ travelRequest: null });
         this.travel(s.travelRequest);
       }
     });
-    this.onAgents(store.getState().agents, store.getState().projects);
+    this.onAgents(store.getState());
 
     addEventListener("resize", () => this.layout());
     this.layout();
@@ -77,10 +76,11 @@ export class Game {
     return b;
   }
 
-  private onAgents(agents: Agent[], projects: string[]) {
+  private onAgents(s: OfficeState) {
+    const { agents, projects } = s;
     // Seat every project's agents in arrival order, even for buildings we're not inside.
     for (const p of projects) this.book(p).update(agents.filter((a) => a.project === p));
-    this.street.setAgents(agents, projects);
+    this.street.setAgents(agents, districts(s));
     if (this.scene instanceof InteriorScene) {
       this.scene.setAgents(agents);
       this.unstick();

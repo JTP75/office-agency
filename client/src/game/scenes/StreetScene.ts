@@ -1,20 +1,39 @@
-// The outdoor street, drawn with pico-8-city tiles at 2×. One building per project.
+// The outdoor street, drawn with pico-8-city tiles at 2×. One building per project,
+// grouped into one district per machine when there are saved SSH machines.
 // Interiors are separate scenes; from out here you only see each building's facade,
 // its name, and a roof-top summary of who's inside.
 import { Container, Graphics, Sprite } from "pixi.js";
 import type { Agent } from "../../net/protocol";
 import { CITY, PAINT, city } from "../assets";
 import { STATUS_COLOR } from "../AgentView";
-import { BUILDING_W, buildStreet, type StreetPlan } from "../layout/street";
+import { BUILDING_W, STREET_H, buildStreet, type DistrictInput, type StreetPlan } from "../layout/street";
 import { makePlaque, makeText, truncate } from "../text";
 import { Scene, TILE, type Trigger } from "./Scene";
 
 const key = (x: number, y: number) => `${x},${y}`;
 
+/** District sign colors: local, then a machine by connection status. */
+const DISTRICT_BG: Record<string, number> = {
+  local: 0x37474f,
+  online: 0x2e7d32,
+  connecting: 0x9a7b0a,
+  offline: 0x5f6368,
+  attention: 0xc62828,
+};
+/** Ground tint over a machine's district; offline ones read as dimmed. */
+const DISTRICT_TINT: Record<string, { color: number; alpha: number }> = {
+  online: { color: 0x3b6ea5, alpha: 0.16 },
+  connecting: { color: 0x3b6ea5, alpha: 0.16 },
+  offline: { color: 0x000000, alpha: 0.28 },
+  attention: { color: 0x7a1f1f, alpha: 0.18 },
+};
+
 export class StreetScene extends Scene {
   readonly name = "street";
   plan: StreetPlan = buildStreet([]);
-  private projectsKey = "\u0000";
+  private layoutKey = "\u0000";
+  private districts: DistrictInput[] = [];
+  private tints = new Graphics();
   private solids = new Set<string>();
   private doors = new Map<string, string>(); // tile → project
   private staticActors: Container[] = [];
@@ -44,14 +63,35 @@ export class StreetScene extends Scene {
     return this.plan.lots.find((l) => l.project === project)?.door ?? null;
   }
 
-  setAgents(agents: Agent[], projects: string[]) {
-    const k = projects.join("\u0000");
-    if (k !== this.projectsKey) {
-      this.projectsKey = k;
-      this.plan = buildStreet(projects);
+  setAgents(agents: Agent[], districts: DistrictInput[]) {
+    // Only which buildings sit in which district moves tiles; a status change just repaints.
+    const k = JSON.stringify(districts.map((d) => [d.machine, d.projects]));
+    this.districts = districts;
+    if (k !== this.layoutKey) {
+      this.layoutKey = k;
+      this.plan = buildStreet(districts);
       this.rebuild();
     }
+    this.paintTints();
     this.refreshRoofs(agents);
+  }
+
+  /** The current status of a planned district (the plan is only rebuilt when layout changes). */
+  private live(i: number) {
+    return this.districts[i] ?? this.plan.districts[i];
+  }
+
+  private paintTints() {
+    this.tints.clear();
+    this.plan.districts.forEach((d, i) => {
+      const status = this.live(i).status;
+      const tint = status ? DISTRICT_TINT[status] : null;
+      if (!tint) return;
+      const w = (d.x1 - d.x0) * TILE;
+      // North side and south side; the road stays shared.
+      this.tints.rect(d.x0 * TILE, 0, w, 10 * TILE).fill(tint);
+      this.tints.rect(d.x0 * TILE, 13 * TILE, w, (STREET_H - 13) * TILE).fill(tint);
+    });
   }
 
   update(time: number) {
@@ -102,6 +142,8 @@ export class StreetScene extends Scene {
         s.position.set(x * TILE, y * TILE);
         this.floor.addChild(s);
       }
+    this.tints = new Graphics();
+    this.floor.addChild(this.tints);
 
     lots.forEach((lot, i) => {
       const b = new Container();
@@ -142,10 +184,29 @@ export class StreetScene extends Scene {
     }
   }
 
+  /**
+   * The district's sign, on the verge just south of the road where you walk past it:
+   * machine label and, for a saved machine, its connection. A district with no
+   * buildings also shows why (the message often names the command that fixes it).
+   */
+  private districtSign(area: StreetPlan["districts"][number], d: DistrictInput) {
+    const text = d.status ? `${truncate(d.label, 24)} · ${d.status}` : truncate(d.label, 24);
+    const sign = makePlaque(text, { size: 7, bg: DISTRICT_BG[d.status ?? "local"], border: 0xffffff, alpha: 0.95 });
+    sign.position.set(area.cx * TILE, 13 * TILE + 12);
+    this.roofs.addChild(sign);
+    if (!d.projects.length) {
+      const note = makeText(truncate(d.message ?? (d.status === "online" ? "no agents" : "no buildings yet"), 40), 5, 0xffffff, true);
+      note.anchor.set(0.5, 0);
+      note.position.set(area.cx * TILE, 13 * TILE + 14);
+      this.roofs.addChild(note);
+    }
+  }
+
   /** Name sign above each building, status dots on the roof, a pulsing badge if anyone is blocked. */
   private refreshRoofs(agents: Agent[]) {
     this.roofs.removeChildren().forEach((c) => c.destroy({ children: true }));
     this.badges = [];
+    this.plan.districts.forEach((d, i) => this.districtSign(d, this.live(i)));
     for (const lot of this.plan.lots) {
       const inside = agents.filter((a) => a.project === lot.project);
       const cx = (lot.x + BUILDING_W / 2) * TILE;

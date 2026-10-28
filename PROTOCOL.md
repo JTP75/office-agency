@@ -13,7 +13,7 @@ Server-Sent Events. Each message is a full snapshot of every agent. The current 
 ```js
 const events = new EventSource(`/api/events?t=${token}`);
 events.onmessage = (e) => {
-  const msg = JSON.parse(e.data); // { type: "snapshot", source, agents }
+  const msg = JSON.parse(e.data); // { type: "snapshot", source, agents, machines }
 };
 ```
 
@@ -29,10 +29,27 @@ events.onmessage = (e) => {
       "project": "office-agency",
       "worktree": "fix/auth",
       "lobby": false,
+      "machine": null,
       "workspace": "w1",
       "tab": "w1:t3",
       "title": "Fix flaky auth test"
+    },
+    {
+      "id": "722e6102aa79d8818e432aac52b40ba9/w1:p1",
+      "kind": "claude",
+      "status": "idle",
+      "project": "vettd",
+      "worktree": "main",
+      "lobby": true,
+      "machine": "pacel-pc",
+      "workspace": "w1",
+      "tab": "w1:t1",
+      "title": "Triage CI failures"
     }
+  ],
+  "machines": [
+    { "id": "722e6102aa79d8818e432aac52b40ba9", "label": "pacel-pc", "status": "online", "message": null },
+    { "id": "757aae5949b5e6e9ad1d10114e8df1ef", "label": "pacel-orin", "status": "attention", "message": "SSH authentication failed. Run: herdr machine reconnect pacel-orin" }
   ]
 }
 ```
@@ -40,16 +57,30 @@ events.onmessage = (e) => {
 | Field | Type | Office meaning |
 | --- | --- | --- |
 | `source` | `"herdr"` \| `"fixture"` | Show "fixture" visibly in the HUD so a demo is never mistaken for real data |
-| `id` | string | One agent session. Stable for the session's life; use it as the desk key |
+| `id` | string | One agent session. Stable for the session's life; use it as the desk key. Opaque: a local agent's is its herdr pane id (`w1:p6`), a saved machine's is `<machine id>/<pane id>`, since pane ids repeat across machines |
 | `kind` | string | Harness: `claude`, `codex`, `opencode`, … → character look |
 | `status` | `working` \| `idle` \| `blocked` \| `done` \| `unknown` | → animation |
-| `project` | string | Repo name; all worktrees of a repo share it → **building**. Unique: two different folders with the same name become `api (work)` and `api (home)` |
+| `project` | string | Repo name; all worktrees of a repo share it → **building**. Unique across the office: two different folders with the same name on one machine become `api (work)` and `api (home)`; a name that exists on more than one machine stays plain locally and becomes `api @ pacel-pc` on the saved machine |
 | `worktree` | string \| null | Branch name (or directory name if detached); `null` outside git → **room** door sign |
 | `lobby` | boolean | `true` for the repo's main checkout or a non-git directory → the **lobby** instead of a room |
+| `machine` | string \| null | The saved SSH machine's label (`herdr machine list`), `null` for a local agent → the **district** of the street the building stands in. A project's agents are all on one machine |
 | `workspace`, `tab` | string | herdr layout ids. Not used for the office layout; ignore unless useful |
 | `title` | string | Terminal title → name tag above the head |
 
 Agents appear and disappear between snapshots as sessions start and end.
+
+### Machines
+
+herdr can save SSH machines (`herdr machine add`); the office shows every enabled one next to the local agents, with the same commands, terminal and create. `machines` lists them (local isn't listed), in the catalog's order:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | herdr's profile id; the prefix of that machine's agent ids |
+| `label` | string | Display name; matches the agents' `machine` |
+| `status` | `connecting` \| `online` \| `offline` \| `attention` | `offline`: unreachable, retried automatically (backoff up to 2 min). `attention`: needs the user (SSH auth, host key, herdr not installed or not running there); retried too |
+| `message` | string \| null | Why it isn't online, often with the command that fixes it. Show it as text |
+
+While a machine isn't `online` its agents aren't in the snapshot (nothing on screen is stale). Its district stays, empty or with empty buildings, and its sign shows the status. The office never prompts for SSH credentials and never installs or starts herdr on a machine.
 
 ## Commands
 
@@ -60,7 +91,7 @@ All return JSON. Success is `200 { "ok": true, … }`; failure is `{ "error": "<
 | `POST /api/agents/:id/prompt` | `{ "text": "…" }` (1–8000 chars) | `{ ok }` | Sends a message to the agent, as if typed + Enter |
 | `GET /api/agents/:id/read?lines=40` | — | `{ ok, lines: ["…"] }` | Last N lines of its terminal, plain text (`lines` 1–200, default 40) |
 | `POST /api/agents/:id/keys` | `{ "keys": ["esc"] }` (1–10 keys) | `{ ok }` | Presses keys, for answering approval dialogs and menus |
-| `POST /api/agents/:id/focus` | — | `{ ok }` | Jumps herdr to the agent's real pane |
+| `POST /api/agents/:id/focus` | — | `{ ok }`, plus `machine` for a saved machine's agent | Jumps herdr to the agent's real pane. On a saved machine that focuses the pane on that machine; the herdr window shows it once that machine is selected in its sidebar, so say so (e.g. "select pacel-pc in herdr") |
 
 Allowed keys: `esc` `enter` `tab` `shift+tab` `up` `down` `left` `right` `space` `y` `n` `1`–`9`. Anything else is refused, so the browser can't drive a shell.
 
@@ -87,6 +118,7 @@ Start new agents from the office. Both calls return once the agent is running (h
 - `name` is the herdr agent name: `[a-z][a-z0-9_-]{0,31}`, unique among live agents. Leave it out to get the first free `<kind>-<n>`.
 - `base` is the ref the new branch starts from (default: the repo's current HEAD). An existing branch is checked out instead of created.
 - A room only exists while it has an agent, so these target rooms and projects seen in the current snapshot, and a new worktree always comes with its first agent.
+- Both run on the machine the project is on (`project` is unique, so it says which); the new agent's `id` has that machine's prefix.
 
 | Status | `error` | Meaning |
 | --- | --- | --- |
@@ -133,7 +165,7 @@ Stream events:
 
 ### Native terminal: `POST /api/agents/:id/open-native`
 
-Opens the agent in a native terminal window (`herdr terminal attach <terminal_id> --takeover`). That window takes control, so an open stream gets `closed` with `terminal attach taken over`; opening the stream again takes it back. Returns `{ ok, terminal: "Ghostty" }`; `501 not_supported` in fixture mode or with no supported app.
+Opens the agent in a native terminal window (`herdr terminal attach <terminal_id> --takeover`; for a saved machine's agent, the same command over `ssh -t <target>`, so the window keeps working after the office stops). That window takes control, so an open stream gets `closed` with `terminal attach taken over`; opening the stream again takes it back. Returns `{ ok, terminal: "Ghostty" }`; `501 not_supported` in fixture mode or with no supported app.
 
 The app comes from `config.json` in the plugin's config directory (`herdr plugin config-dir office-agency`): `{ "terminal": "ghostty" | "kitty" | "terminal" }`, default `ghostty` (`terminal` = macOS Terminal.app).
 
@@ -151,5 +183,6 @@ The app comes from `config.json` in the plugin's config directory (`herdr plugin
 | `empty` | No agents at all |
 | `crowded` | 40 agents in one worktree room (`swarm/research`) plus 2 in the lobby |
 | `churn` | `default`, plus agents arriving and leaving every 5 s and the `tts` project disappearing and coming back |
+| `machines` | `default`, plus saved machine `pacel-pc` (online: `vettd` with three rooms, and `office-agency @ pacel-pc`; its pane ids collide with local ones) and `pacel-orin` (offline, no agents) |
 
 In fixture mode the commands are simulated too. A prompt sets the agent `working`, then `done` after 4 s. `enter`, `y`, `n`, `1` or `2` answers a blocked agent's dialog; `esc` cancels it to `idle`. `read` returns a fake transcript including what you sent.
